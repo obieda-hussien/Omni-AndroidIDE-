@@ -39,7 +39,6 @@ class OmniIdeBuildController(private val context: Context) {
     private var initializedProject: String? = null
     private var ownsHeadlessListener = false
     private val operationMutex = Mutex()
-    private val operationMutex = Mutex()
 
     suspend fun ensureService(): GradleBuildService {
         val existing = Lookup.getDefault().lookup(BuildService.KEY_BUILD_SERVICE)
