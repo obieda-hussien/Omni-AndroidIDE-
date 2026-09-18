@@ -22,6 +22,7 @@ import dev.mutwakil.androidide.activities.editor.EditorActivityKt
 import dev.mutwakil.androidide.preferences.internal.GeneralPreferences
 import dev.mutwakil.androidide.project.manager.builder.LanguageType
 import dev.mutwakil.androidide.projects.ProjectManagerImpl
+import dev.mutwakil.androidide.services.log.lookupLogService
 import dev.mutwakil.androidide.templates.android.TemplateOptions
 import dev.mutwakil.androidide.templates.android.TemplateRegistry
 import dev.mutwakil.androidide.utils.Environment
@@ -164,10 +165,14 @@ class OmniIdeExtensionService : ExtensionService() {
     override fun onCreate() {
         super.onCreate()
         OmniIdeStateBridge.addBuildOutputListener(buildOutputListener)
+        OmniIdeObservabilityBridge.setObserverEnabled(true)
+        lookupLogService()?.setOmniObserverEnabled(true)
     }
 
     override fun onDestroy() {
         OmniIdeStateBridge.removeBuildOutputListener(buildOutputListener)
+        OmniIdeObservabilityBridge.setObserverEnabled(false)
+        lookupLogService()?.setOmniObserverEnabled(false)
         runningJobs.values.forEach { it.cancel() }
         runningJobs.clear()
         listeners.kill()
