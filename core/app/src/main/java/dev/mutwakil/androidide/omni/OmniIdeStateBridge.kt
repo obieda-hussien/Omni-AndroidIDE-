@@ -179,13 +179,19 @@ object OmniIdeStateBridge {
             )
         }
 
-        val before = if (open != null) {
-            open["revision"]?.toString()?.trim('"').orEmpty()
-        } else if (file.exists()) {
+        val openRevision = open?.get("revision")?.toString()?.trim('"')
+        val diskRevision = if (file.exists()) {
             withContext(Dispatchers.IO) { sha256(file.readText()) }
         } else {
             sha256("")
         }
+        if (openRevision != null && openRevision != diskRevision) {
+            throw IllegalStateException(
+                "external_change_conflict: the clean editor buffer no longer matches disk. " +
+                    "Refresh/re-read the file before writing."
+            )
+        }
+        val before = diskRevision
 
         if (!expectedRevision.isNullOrBlank() && expectedRevision != before) {
             throw IllegalStateException(
