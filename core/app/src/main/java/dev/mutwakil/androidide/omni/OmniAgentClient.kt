@@ -25,6 +25,10 @@ import kotlinx.serialization.json.Json
  * AndroidIDE -> Workspace connection. Workspace remains the only model/tool/MCP runtime.
  */
 class OmniAgentClient(private val context: Context) {
+    companion object {
+        private const val MAX_GATEWAY_REQUEST_CHARS = 300_000
+    }
+
     private val appContext = context.applicationContext
     private val json = Json {
         ignoreUnknownKeys = true
@@ -67,10 +71,26 @@ class OmniAgentClient(private val context: Context) {
             }
         }
 
+        val requestJson = json.encodeToString(AgentTaskRequest.serializer(), request)
+        if (requestJson.length > MAX_GATEWAY_REQUEST_CHARS) {
+            trySend(
+                AgentTaskEvent.Error(
+                    taskId = request.taskId,
+                    sequence = 0,
+                    timestamp = System.currentTimeMillis(),
+                    code = "request_too_large",
+                    message = "AndroidIDE context is too large for safe Binder transport. " +
+                        "Narrow the active context or retry after reducing build output."
+                )
+            )
+            close()
+            return@callbackFlow
+        }
+
         try {
             connect().startAgentTask(
                 OmniLinkConstants.CURRENT_PROTOCOL_VERSION,
-                json.encodeToString(AgentTaskRequest.serializer(), request),
+                requestJson,
                 callback
             )
         } catch (error: Exception) {
