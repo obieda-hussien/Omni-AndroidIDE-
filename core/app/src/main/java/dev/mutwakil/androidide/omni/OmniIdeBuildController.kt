@@ -13,8 +13,10 @@ import dev.mutwakil.androidide.services.builder.GradleServiceBinder
 import dev.mutwakil.androidide.services.builder.gradleDistributionParams
 import dev.mutwakil.androidide.tooling.api.messages.AndroidInitializationParams
 import dev.mutwakil.androidide.tooling.api.messages.InitializeProjectParams
+import dev.mutwakil.androidide.tooling.api.messages.result.BuildInfo
 import dev.mutwakil.androidide.tooling.api.messages.result.InitializeResult
 import dev.mutwakil.androidide.tooling.api.messages.result.TaskExecutionResult
+import dev.mutwakil.androidide.tooling.events.ProgressEvent
 import dev.mutwakil.androidide.tooling.api.messages.result.isSuccessful
 import dev.mutwakil.androidide.tooling.api.sync.ProjectSyncHelper
 import java.io.File
@@ -33,6 +35,7 @@ class OmniIdeBuildController(private val context: Context) {
     private var connection: ServiceConnection? = null
     private var boundService: GradleBuildService? = null
     private var initializedProject: String? = null
+    private var ownsHeadlessListener = false
 
     suspend fun ensureService(): GradleBuildService {
         val existing = Lookup.getDefault().lookup(BuildService.KEY_BUILD_SERVICE)
@@ -40,11 +43,13 @@ class OmniIdeBuildController(private val context: Context) {
         if (existing != null) {
             boundService = existing
             ensureToolingServer(existing)
+            configureOutputListener(existing)
             return existing
         }
 
         boundService?.let {
             ensureToolingServer(it)
+            configureOutputListener(it)
             return it
         }
 
@@ -80,6 +85,7 @@ class OmniIdeBuildController(private val context: Context) {
 
         val service = withTimeout(20_000) { deferred.await() }
         ensureToolingServer(service)
+        configureOutputListener(service)
         return service
     }
 
@@ -133,10 +139,41 @@ class OmniIdeBuildController(private val context: Context) {
     }
 
     fun release() {
-        val conn = connection ?: return
-        runCatching { context.unbindService(conn) }
+        if (ownsHeadlessListener) {
+            runCatching { boundService?.setEventListener(null) }
+            ownsHeadlessListener = false
+        }
+        connection?.let { conn -> runCatching { context.unbindService(conn) } }
         connection = null
         boundService = null
+    }
+
+    private fun configureOutputListener(service: GradleBuildService) {
+        // When an editor Activity is alive, its EditorBuildEventListener owns this slot and mirrors
+        // output through ProjectHandlerActivity.appendBuildOutput(). Headless agent runs need their
+        // own listener so Omni still receives compiler/Gradle diagnostics while AndroidIDE is hidden.
+        if (OmniIdeStateBridge.activeActivity() != null) {
+            ownsHeadlessListener = false
+            return
+        }
+        service.setEventListener(object : GradleBuildService.EventListener {
+            override fun prepareBuild(buildInfo: BuildInfo) = Unit
+            override fun onBuildSuccessful(tasks: List<String?>) {
+                OmniIdeStateBridge.appendBuildOutput(
+                    "\n[Omni] BUILD SUCCESSFUL: " + tasks.filterNotNull().joinToString() + "\n"
+                )
+            }
+            override fun onProgressEvent(event: ProgressEvent) = Unit
+            override fun onBuildFailed(tasks: List<String?>) {
+                OmniIdeStateBridge.appendBuildOutput(
+                    "\n[Omni] BUILD FAILED: " + tasks.filterNotNull().joinToString() + "\n"
+                )
+            }
+            override fun onOutput(line: String?) {
+                line?.let { OmniIdeStateBridge.appendBuildOutput(it + "\n") }
+            }
+        })
+        ownsHeadlessListener = true
     }
 
     private suspend fun ensureToolingServer(service: GradleBuildService) {
