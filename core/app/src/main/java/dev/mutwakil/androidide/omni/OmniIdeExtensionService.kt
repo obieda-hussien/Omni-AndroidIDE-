@@ -29,6 +29,7 @@ import java.io.File
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -207,16 +208,25 @@ class OmniIdeExtensionService : ExtensionService() {
                 }
                 "ide.cancel_job" -> {
                     val id = payload.requiredString("job_id")
-                    val isActiveGradleJob = activeGradleJobId.get() == id
-                    runningJobs.remove(id)?.cancel()
-                    if (isActiveGradleJob) {
-                        runCatching { buildController.cancelCurrentBuild() }
+                    val record = jobRecords[id]
+                        ?: return failure("job_not_found", "Unknown IDE job: $id")
+                    if (record.state != "QUEUED" && record.state != "RUNNING") {
+                        return failure(
+                            "job_not_running",
+                            "IDE job $id is already ${record.state}"
+                        )
                     }
-                    jobRecords.computeIfPresent(id) { _, record ->
-                        record.copy(
+
+                    val isActiveGradleJob = activeGradleJobId.get() == id
+                    jobRecords.computeIfPresent(id) { _, current ->
+                        current.copy(
                             state = "CANCELLED",
                             finishedAt = System.currentTimeMillis()
                         )
+                    }
+                    runningJobs.remove(id)?.cancel()
+                    if (isActiveGradleJob) {
+                        runCatching { buildController.cancelCurrentBuild() }
                     }
                     publishJob(id)
                     success(buildJsonObject { put("cancelled", true); put("job_id", id) })
@@ -396,6 +406,16 @@ class OmniIdeExtensionService : ExtensionService() {
             publishJob(id)
             try {
                 block(id)
+            } catch (cancelled: CancellationException) {
+                jobRecords.computeIfPresent(id) { _, current ->
+                    if (current.state == "CANCELLED") current
+                    else current.copy(
+                        state = "CANCELLED",
+                        finishedAt = System.currentTimeMillis()
+                    )
+                }
+                publishJob(id)
+                throw cancelled
             } catch (error: Exception) {
                 finishJob(
                     id = id,
