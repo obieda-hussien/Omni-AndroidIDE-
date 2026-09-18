@@ -24,6 +24,8 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.future.await
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 
@@ -36,6 +38,7 @@ class OmniIdeBuildController(private val context: Context) {
     private var boundService: GradleBuildService? = null
     private var initializedProject: String? = null
     private var ownsHeadlessListener = false
+    private val operationMutex = Mutex()
 
     suspend fun ensureService(): GradleBuildService {
         val existing = Lookup.getDefault().lookup(BuildService.KEY_BUILD_SERVICE)
@@ -92,6 +95,13 @@ class OmniIdeBuildController(private val context: Context) {
     suspend fun syncProject(
         root: File = OmniIdeStateBridge.projectRoot(),
         force: Boolean = false
+    ): InitializeResult = operationMutex.withLock {
+        syncProjectLocked(root, force)
+    }
+
+    private suspend fun syncProjectLocked(
+        root: File,
+        force: Boolean
     ): InitializeResult {
         val service = ensureService()
         val manager = ProjectManagerImpl.getInstance()
@@ -125,12 +135,12 @@ class OmniIdeBuildController(private val context: Context) {
         root: File,
         tasks: List<String>,
         forceSync: Boolean = false
-    ): TaskExecutionResult {
+    ): TaskExecutionResult = operationMutex.withLock {
         require(tasks.isNotEmpty()) { "At least one Gradle task is required" }
         val service = ensureService()
-        val init = syncProject(root, forceSync)
+        val init = syncProjectLocked(root, forceSync)
         check(init.isSuccessful) { "Project initialization/sync failed: $init" }
-        return service.executeTasks(tasks).await()
+        service.executeTasks(tasks).await()
     }
 
     suspend fun cancelCurrentBuild(): String {
