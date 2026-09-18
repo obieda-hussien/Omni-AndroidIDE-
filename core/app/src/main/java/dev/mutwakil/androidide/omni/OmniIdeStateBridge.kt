@@ -11,6 +11,7 @@ import java.util.concurrent.CopyOnWriteArraySet
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -80,14 +81,24 @@ object OmniIdeStateBridge {
             put("toolingServerStarted", service?.isToolingServerStarted() == true)
             put("buildOutputTail", buildOutputSnapshot())
             put("syncIssues", buildJsonArray {
-                manager.projectSyncIssues.take(100).forEach { add(it.toString()) }
+                manager.projectSyncIssues.take(100).forEach { issue ->
+                    add(JsonPrimitive(issue.toString()))
+                }
             })
             put("modules", buildJsonArray {
                 manager.workspace?.subProjects?.take(100)?.forEach { module ->
                     add(buildJsonObject {
                         put("name", module.name)
                         put("path", module.path)
-                        put("projectDir", module.projectDir.absolutePath)
+                        val relativeModuleDir = module.path
+                            .trim(':')
+                            .replace(':', File.separatorChar)
+                        val moduleDir = if (relativeModuleDir.isBlank()) {
+                            File(projectRoot)
+                        } else {
+                            File(projectRoot, relativeModuleDir)
+                        }
+                        put("projectDir", moduleDir.absolutePath)
                     })
                 }
             })
@@ -96,7 +107,7 @@ object OmniIdeStateBridge {
     }
 
     suspend fun activeDocument(): JsonObject? = withContext(Dispatchers.Main.immediate) {
-        val view = activeActivity()?.provideCurrentEditor() ?: return@withContext null
+        val view = activeActivity()?.getCurrentEditor() ?: return@withContext null
         val editor = view.editor ?: return@withContext null
         val file = editor.file ?: return@withContext null
         val content = editor.text?.toString().orEmpty()
@@ -192,7 +203,9 @@ object OmniIdeStateBridge {
         return buildJsonObject {
             put("root", root.absolutePath)
             put("count", paths.size)
-            put("files", buildJsonArray { paths.forEach(::add) })
+            put("files", buildJsonArray {
+                paths.forEach { path -> add(JsonPrimitive(path)) }
+            })
             put("truncated", paths.size >= capped)
         }
     }
@@ -202,7 +215,7 @@ object OmniIdeStateBridge {
         withContext(Dispatchers.Main.immediate) {
             val activity = activeActivity()
                 ?: throw IllegalStateException("No active AndroidIDE editor")
-            activity.doOpenFile(file, null)
+            activity.openFile(file, null)
         }
     }
 
