@@ -1,5 +1,6 @@
 package dev.mutwakil.androidide.omni
 
+import android.content.Intent
 import android.graphics.Typeface
 import android.os.Bundle
 import android.view.Gravity
@@ -34,6 +35,10 @@ import kotlinx.serialization.json.buildJsonObject
  * so closing it never terminates the durable conversation saved by Omni Dev Workspace.
  */
 class OmniWorkspaceFragment : Fragment() {
+
+    companion object {
+        private const val WORKSPACE_PACKAGE = "com.omnidev.workspace"
+    }
 
     private var client: OmniAgentClient? = null
     private var conversations: OmniConversationStore? = null
@@ -123,6 +128,12 @@ class OmniWorkspaceFragment : Fragment() {
             textSize = 20f
             setTypeface(typeface, Typeface.BOLD)
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        })
+        header.addView(MaterialButton(context).apply {
+            text = "Split"
+            textSize = 10f
+            isAllCaps = false
+            setOnClickListener { openWorkspaceAdjacent() }
         })
         header.addView(MaterialButton(context).apply {
             text = "×"
@@ -326,6 +337,16 @@ class OmniWorkspaceFragment : Fragment() {
             if (needsTitle && title != null) store.setTitle(projectRoot, conversationId, title)
 
             var streamed = false
+            var lastLocalCheckpoint = 0L
+
+            fun persistLocal(force: Boolean = false) {
+                val now = System.currentTimeMillis()
+                if (!force && now - lastLocalCheckpoint < 700L) return
+                lastLocalCheckpoint = now
+                store.saveTranscript(projectRoot, conversationId, transcript.text.toString())
+                store.saveConsole(projectRoot, conversationId, console.text.toString())
+            }
+
             try {
                 activeClient.runTask(request).collect { event ->
                     when (event) {
@@ -368,8 +389,11 @@ class OmniWorkspaceFragment : Fragment() {
                             status.text = "Cancelled"
                         }
                     }
-                    store.saveTranscript(projectRoot, conversationId, transcript.text.toString())
-                    store.saveConsole(projectRoot, conversationId, console.text.toString())
+                    persistLocal(
+                        force = event is AgentTaskEvent.FinalAnswer ||
+                            event is AgentTaskEvent.Error ||
+                            event is AgentTaskEvent.Cancelled
+                    )
                 }
             } catch (error: Exception) {
                 appendChat("\n⚠ ${error.message ?: "Omni connection failed"}\n")
@@ -379,8 +403,7 @@ class OmniWorkspaceFragment : Fragment() {
                 currentTaskId = null
                 stop.isEnabled = false
                 send.isEnabled = true
-                store.saveTranscript(projectRoot, conversationId, transcript.text.toString())
-                store.saveConsole(projectRoot, conversationId, console.text.toString())
+                persistLocal(force = true)
                 refreshHistory()
             }
         }
@@ -469,6 +492,32 @@ class OmniWorkspaceFragment : Fragment() {
             isAllCaps = false
             setOnClickListener { action() }
         })
+    }
+
+    private fun openWorkspaceAdjacent() {
+        val context = requireContext()
+        val launch = context.packageManager.getLaunchIntentForPackage(WORKSPACE_PACKAGE)
+        if (launch == null) {
+            status.text = "Omni Dev Workspace is not installed"
+            return
+        }
+
+        val adjacent = Intent(launch).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
+            addFlags(Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT)
+        }
+        runCatching { startActivity(adjacent) }
+            .onFailure {
+                runCatching {
+                    startActivity(
+                        Intent(launch).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                }.onFailure { fallbackError ->
+                    status.text = "Could not open Workspace: " +
+                        (fallbackError.message ?: fallbackError.javaClass.simpleName)
+                }
+            }
     }
 
     private fun topic(value: String): String =
