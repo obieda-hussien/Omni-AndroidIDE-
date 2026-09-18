@@ -139,10 +139,10 @@ class OmniIdeBuildController(private val context: Context) {
     }
 
     fun release() {
-        if (ownsHeadlessListener) {
-            runCatching { boundService?.setEventListener(null) }
-            ownsHeadlessListener = false
-        }
+        // Do not clear GradleBuildService.eventListener here. An Editor Activity may have replaced
+        // our headless listener after this controller started; clearing the shared slot would then
+        // detach the editor's real build listener. A future editor/headless owner simply replaces it.
+        ownsHeadlessListener = false
         connection?.let { conn -> runCatching { context.unbindService(conn) } }
         connection = null
         boundService = null
