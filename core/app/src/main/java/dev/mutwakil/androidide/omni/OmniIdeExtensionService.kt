@@ -35,7 +35,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.future.await
 import kotlinx.coroutines.launch
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
@@ -404,7 +403,7 @@ class OmniIdeExtensionService : ExtensionService() {
     }
 
     private fun publish(name: String, payload: JsonObject) {
-        val event = json.encodeToString(OmniEvent(name, payload))
+        val event = json.encodeToString(OmniEvent.serializer(), OmniEvent(name, payload))
         val count = listeners.beginBroadcast()
         try {
             for (index in 0 until count) {
