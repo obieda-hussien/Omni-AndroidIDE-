@@ -84,7 +84,7 @@ class OmniAgentClient(private val context: Context) {
                     message = error.message ?: "Unable to connect to Omni"
                 )
             )
-            close(error)
+            close()
         }
 
         awaitClose { }
