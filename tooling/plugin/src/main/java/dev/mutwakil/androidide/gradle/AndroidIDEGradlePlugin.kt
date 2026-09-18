@@ -16,6 +16,7 @@
  */
 package dev.mutwakil.androidide.gradle
 
+import dev.mutwakil.androidide.buildinfo.BuildInfo
 import dev.mutwakil.androidide.tooling.api.LogSenderConfig.PROPERTY_LOGSENDER_ENABLED
 import org.gradle.api.Plugin
 import org.gradle.api.Project
@@ -43,8 +44,10 @@ class AndroidIDEGradlePlugin : Plugin<Project> {
       val isLogSenderEnabled = if (hasProperty(PROPERTY_LOGSENDER_ENABLED)) {
         property(PROPERTY_LOGSENDER_ENABLED).toString().toBoolean()
       } else {
-        // enabled by default
-        true
+        // Internal AndroidIDE builds use commit-scoped SNAPSHOT versions which are not guaranteed
+        // to exist in Sonatype. Do not make ordinary project sync depend on that remote artifact.
+        // Tests keep the historical behavior, and published builds can still inject LogSender.
+        isTestEnv || !BuildInfo.VERSION_NAME_DOWNLOAD.endsWith("-SNAPSHOT", ignoreCase = true)
       }
 
       if (plugins.hasPlugin(APP_PLUGIN)) {
@@ -53,7 +56,10 @@ class AndroidIDEGradlePlugin : Plugin<Project> {
           logger.info("Trying to apply LogSender plugin to project '${project.path}'")
           pluginManager.apply(LogSenderPlugin::class.java)
         } else {
-          logger.warn("LogSender is disabled. Dependency will not be added to project '${project.path}'.")
+          logger.warn(
+            "LogSender is disabled for project '${project.path}'. " +
+              "Internal/SNAPSHOT IDE builds avoid unpublished remote LogSender artifacts."
+          )
         }
       }
     }

@@ -45,6 +45,7 @@ import dev.mutwakil.androidide.handlers.LspHandler.connectClient
 import dev.mutwakil.androidide.handlers.LspHandler.destroyLanguageServers
 import dev.mutwakil.androidide.lookup.Lookup
 import dev.mutwakil.androidide.lsp.IDELanguageClientImpl
+import dev.mutwakil.androidide.omni.OmniIdeStateBridge
 import dev.mutwakil.androidide.lsp.java.utils.CancelChecker
 import dev.mutwakil.androidide.preferences.internal.GeneralPreferences
 import dev.mutwakil.androidide.projects.ProjectManagerImpl
@@ -312,6 +313,7 @@ abstract class ProjectHandlerActivity : BaseEditorActivity() {
   }
 
   fun appendBuildOutput(str: String) {
+    OmniIdeStateBridge.appendBuildOutput(str)
     content.bottomSheet.appendBuildOut(str)
   }
 

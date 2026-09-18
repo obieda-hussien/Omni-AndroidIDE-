@@ -50,4 +50,19 @@
 
   </com.google.android.material.navigation.NavigationView>
 
+  <com.google.android.material.navigation.NavigationView
+    android:id="@+id/omniNav"
+    android:layout_width="340dp"
+    android:layout_height="match_parent"
+    android:layout_gravity="end"
+    app:elevation="16dp">
+
+    <androidx.fragment.app.FragmentContainerView
+      android:id="@+id/omni_workspace"
+      android:name="dev.mutwakil.androidide.omni.OmniWorkspaceFragment"
+      android:layout_width="match_parent"
+      android:layout_height="match_parent" />
+
+  </com.google.android.material.navigation.NavigationView>
+
 </dev.mutwakil.androidide.ui.ContentTranslatingDrawerLayout>

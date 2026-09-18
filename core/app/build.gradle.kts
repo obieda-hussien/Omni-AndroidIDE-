@@ -17,6 +17,8 @@
 
 @file:Suppress("UnstableApiUsage")
 
+import java.util.Properties
+
 import dev.mutwakil.androidide.build.config.BuildConfig
 import dev.mutwakil.androidide.desugaring.utils.JavaIOReplacements.applyJavaIOReplacements
 import dev.mutwakil.androidide.plugins.AndroidIDEAssetsPlugin
@@ -30,6 +32,32 @@ plugins {
     id("androidx.navigation.safeargs.kotlin")
     id("dev.mutwakil.androidide.desugaring")
 }
+
+val omniLocalProperties = Properties().apply {
+    val local = rootProject.file("local.properties")
+    if (local.isFile) {
+        local.inputStream().use { stream -> load(stream) }
+    }
+}
+
+fun omniSigningValue(name: String): String? =
+    providers.gradleProperty(name).orNull
+        ?: providers.environmentVariable(name).orNull
+        ?: omniLocalProperties.getProperty(name)
+
+val omniSharedDebugSigning = listOf(
+    "OMNI_SHARED_DEBUG_STORE_FILE",
+    "OMNI_SHARED_DEBUG_STORE_PASSWORD",
+    "OMNI_SHARED_DEBUG_KEY_ALIAS",
+    "OMNI_SHARED_DEBUG_KEY_PASSWORD"
+).map(::omniSigningValue)
+
+val omniSharedReleaseSigning = listOf(
+    "OMNI_SHARED_RELEASE_STORE_FILE",
+    "OMNI_SHARED_RELEASE_STORE_PASSWORD",
+    "OMNI_SHARED_RELEASE_KEY_ALIAS",
+    "OMNI_SHARED_RELEASE_KEY_PASSWORD"
+).map(::omniSigningValue)
 
 apply {
     plugin(AndroidIDEAssetsPlugin::class.java)
@@ -59,12 +87,36 @@ android {
        dataBinding = true
     }
 
+    signingConfigs {
+        if (omniSharedDebugSigning.all { !it.isNullOrBlank() }) {
+            create("omniSharedDebug") {
+                storeFile = rootProject.file(omniSharedDebugSigning[0]!!)
+                storePassword = omniSharedDebugSigning[1]
+                keyAlias = omniSharedDebugSigning[2]
+                keyPassword = omniSharedDebugSigning[3]
+            }
+        }
+        if (omniSharedReleaseSigning.all { !it.isNullOrBlank() }) {
+            create("omniSharedRelease") {
+                storeFile = rootProject.file(omniSharedReleaseSigning[0]!!)
+                storePassword = omniSharedReleaseSigning[1]
+                keyAlias = omniSharedReleaseSigning[2]
+                keyPassword = omniSharedReleaseSigning[3]
+            }
+        }
+    }
+
     buildTypes {
         release {
+            (signingConfigs.findByName("omniSharedRelease")
+                ?: signingConfigs.findByName("omniSharedDebug"))
+                ?.let { signingConfig = it }
             isShrinkResources = true
             manifestPlaceholders["sentryDsn"] = ""
         }
         debug {
+            signingConfigs.findByName("omniSharedDebug")
+                ?.let { signingConfig = it }
             manifestPlaceholders["sentryDsn"] = ""
         }
     }
@@ -121,6 +173,10 @@ configurations.configureEach {
 }
 
 dependencies {
+    // OmniLink: AndroidIDE is both an Omni capability provider and an embedded-agent client.
+    implementation("com.github.obieda-hussien:OmniLinkSDK:v1.1.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+
     implementation(libs.androidx.room.ktx)
     debugImplementation(libs.common.leakcanary)
 
@@ -196,6 +252,7 @@ dependencies {
     implementation(projects.java.lsp)
     implementation(projects.logging.idestats)
     implementation(projects.logging.logsender)
+    implementation(projects.logging.logger)
     implementation(projects.termux.application)
     implementation(projects.termux.view)
     implementation(projects.termux.emulator)
@@ -230,7 +287,6 @@ dependencies {
     // So we always copy the latest JAR file to assets
     compileOnly(projects.tooling.impl)
 
-    implementation(projects.logging.logsender)
 
     // Sentry Android SDK (core + replay for quality configuration)
 //  implementation(libs.sentry.core)

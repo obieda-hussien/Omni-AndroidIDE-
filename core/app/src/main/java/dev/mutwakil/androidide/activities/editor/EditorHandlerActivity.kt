@@ -52,6 +52,7 @@ import dev.mutwakil.androidide.models.OpenedFile
 import dev.mutwakil.androidide.models.OpenedFilesCache
 import dev.mutwakil.androidide.models.Range
 import dev.mutwakil.androidide.models.SaveResult
+import dev.mutwakil.androidide.omni.OmniIdeStateBridge
 import dev.mutwakil.androidide.preferences.internal.GeneralPreferences
 import dev.mutwakil.androidide.projects.ProjectManagerImpl
 import dev.mutwakil.androidide.tasks.executeAsync
@@ -100,6 +101,7 @@ open class EditorHandlerActivity : ProjectHandlerActivity(), IEditorHandler {
   }
 
   override fun preDestroy() {
+    OmniIdeStateBridge.detach(this)
     super.preDestroy()
     TSLanguageRegistry.instance.destroy()
     editorViewModel.removeAllFiles()
@@ -108,6 +110,8 @@ open class EditorHandlerActivity : ProjectHandlerActivity(), IEditorHandler {
   override fun onCreate(savedInstanceState: Bundle?) {
     mBuildEventListener.setActivity(this)
     super.onCreate(savedInstanceState)
+    OmniIdeStateBridge.attach(this)
+    configureOmniWorkspaceDrawer()
 
     editorViewModel._displayedFile.observe(
       this) { this.content.editorContainer.displayedChild = it }
@@ -166,6 +170,7 @@ open class EditorHandlerActivity : ProjectHandlerActivity(), IEditorHandler {
 
   override fun onResume() {
     super.onResume()
+    OmniIdeStateBridge.attach(this)
     isOpenedFilesSaved.set(false)
     checkForExternalFileChanges()
   }
@@ -176,7 +181,8 @@ open class EditorHandlerActivity : ProjectHandlerActivity(), IEditorHandler {
 	 * false). A clean buffer may still have undo history after [IDEEditor.markUnmodified] / save; we
 	 * reload anyway so external edits are not ignored. Never replaces buffers with unsaved edits.
 	 *
-	 * @param force If true, reloads even if the buffer is modified or the timestamp hasn't changed.
+	 * @param force If true, ignores the timestamp check for clean buffers. Dirty buffers are never
+	 * overwritten; unsaved editor content always wins until the user saves or reconciles it.
 	 */
 	fun checkForExternalFileChanges(force: Boolean = false) {
 		val openFiles = editorViewModel.getOpenedFiles()
@@ -191,7 +197,7 @@ open class EditorHandlerActivity : ProjectHandlerActivity(), IEditorHandler {
 					val newContent = runCatching { file.readText() }.getOrNull() ?: return@forEach
 					withContext(Dispatchers.Main) {
 						val editorView = getEditorForFile(file) ?: return@withContext
-						if (editorView.isModified && !force) return@withContext
+						if (editorView.isModified) return@withContext
 						val ideEditor = editorView.editor ?: return@withContext
 
 						ideEditor.setText(newContent)
@@ -257,7 +263,46 @@ open class EditorHandlerActivity : ProjectHandlerActivity(), IEditorHandler {
 
     val data = createToolbarActionData()
     getInstance().fillMenu(FillMenuParams(data, EDITOR_TOOLBAR, menu))
+
+    menu.add(Menu.NONE, 0x4F4D4E49, Menu.NONE, "Omni").apply {
+      setIcon(dev.mutwakil.androidide.R.drawable.ic_omni_agent)
+      setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
+      setOnMenuItemClickListener {
+        toggleOmniWorkspace()
+        true
+      }
+    }
     return true
+  }
+
+  fun openOmniWorkspace() {
+    binding.editorDrawerLayout.openDrawer(GravityCompat.END)
+  }
+
+  fun closeOmniWorkspace() {
+    binding.editorDrawerLayout.closeDrawer(GravityCompat.END)
+  }
+
+  private fun toggleOmniWorkspace() {
+    if (binding.editorDrawerLayout.isDrawerOpen(GravityCompat.END)) {
+      closeOmniWorkspace()
+    } else {
+      openOmniWorkspace()
+    }
+  }
+
+  private fun configureOmniWorkspaceDrawer() {
+    binding.editorDrawerLayout.childId = binding.swipeReveal.id
+    binding.editorDrawerLayout.translationBehaviorEnd =
+      dev.mutwakil.androidide.ui.ContentTranslatingDrawerLayout.TranslationBehavior.DEFAULT
+
+    val density = resources.displayMetrics.density
+    val screenWidth = resources.displayMetrics.widthPixels
+    val maxWidth = (600f * density).toInt()
+    val desired = (screenWidth * 0.94f).toInt()
+    binding.omniNav.layoutParams = binding.omniNav.layoutParams.apply {
+      width = minOf(desired, maxWidth)
+    }
   }
 
   open fun prepareOptionsMenu(menu: Menu) {

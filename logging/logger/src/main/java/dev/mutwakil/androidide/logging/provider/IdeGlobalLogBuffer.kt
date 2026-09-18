@@ -65,6 +65,25 @@ object IdeGlobalLogBuffer {
 		consumers.remove(consumer)
 	}
 
+	/**
+	 * Return a stable bounded snapshot for diagnostics/agent consumers without registering a live
+	 * consumer. Oldest retained entries are returned first.
+	 */
+	fun snapshot(
+		limit: Int = MAX_BUFFER_SIZE,
+		query: String? = null,
+	): List<String> {
+		val max = limit.coerceIn(1, MAX_BUFFER_SIZE)
+		return buffer.toList()
+			.asSequence()
+			.filter { event ->
+				query.isNullOrBlank() || event.message.contains(query, ignoreCase = true)
+			}
+			.toList()
+			.takeLast(max)
+			.map { event -> "[${event.level}] ${event.message}" }
+	}
+
 	fun append(
 		level: Level,
 		formattedMessage: String,

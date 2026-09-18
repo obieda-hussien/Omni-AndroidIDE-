@@ -21,6 +21,7 @@ import android.util.Log
 import dev.mutwakil.androidide.logsender.ILogReceiver
 import dev.mutwakil.androidide.logsender.ILogSender
 import dev.mutwakil.androidide.models.LogLine
+import dev.mutwakil.androidide.omni.OmniIdeObservabilityBridge
 import dev.mutwakil.androidide.tasks.executeAsyncProvideError
 import org.slf4j.LoggerFactory
 import java.util.concurrent.atomic.AtomicBoolean
@@ -46,14 +47,25 @@ class LogReceiverImpl(
   internal var consumer: ((LogLine) -> Unit)? = consumer
     set(value) {
       field = value
-      senderHandler.consumer = value?.let { synchronizeConsumer(value) }
+      senderHandler.consumer = ::dispatchLine
     }
+
+  init {
+    // Keep the sender stream active even when the Logs UI is not bound. Omni receives a bounded
+    // copy while the normal UI consumer, when present, continues to receive the same LogLine.
+    senderHandler.consumer = ::dispatchLine
+  }
 
   companion object {
     private val log = LoggerFactory.getLogger(LogReceiverImpl::class.java)
   }
 
-  private fun synchronizeConsumer(consumer: (LogLine) -> Unit): (LogLine) -> Unit = { line -> consumerLock.withLock { consumer(line) } }
+  private fun dispatchLine(line: LogLine) {
+    consumerLock.withLock {
+      consumer?.invoke(line)
+      OmniIdeObservabilityBridge.appendAppLog(line.toString())
+    }
+  }
 
   fun acceptSenders() {
     if (senderHandler.isAlive()) {
@@ -126,6 +138,7 @@ class LogReceiverImpl(
       senders.getPendingSenders().forEach { sender ->
         log.info("Notifying sender '{}' to start reading logs...", sender.packageName)
         sender.startReader(sender.port)
+        sender.isStarted = true
       }
     }
   }

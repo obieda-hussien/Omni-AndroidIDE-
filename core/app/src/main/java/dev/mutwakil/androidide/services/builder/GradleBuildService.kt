@@ -353,6 +353,10 @@ class GradleBuildService : Service(), BuildService, IToolingApiClient,
   }
 
   override fun getBuildArguments(): CompletableFuture<List<String>> {
+    // Self-heal IDE-owned Gradle integration files before every project invocation. This catches
+    // APK upgrades where an old ~/.androidide/init/init.gradle survived from a previous version.
+    ToolsManager.ensureGradleIntegrationCurrent()
+
     val extraArgs = ArrayList<String>()
     extraArgs.add("--init-script")
     extraArgs.add(Environment.INIT_SCRIPT.absolutePath)

@@ -39,6 +39,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Properties;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import kotlin.io.ConstantsKt;
 import kotlin.io.FilesKt;
@@ -48,6 +49,7 @@ public class ToolsManager {
   private static final Logger LOG = LoggerFactory.getLogger(ToolsManager.class);
 
   public static String COMMON_ASSET_DATA_DIR = "data/common";
+  private static final AtomicBoolean GRADLE_INTEGRATION_VERIFIED = new AtomicBoolean(false);
 
   public static void init(@NonNull BaseApplication app, Runnable onFinish) {
 
@@ -61,12 +63,11 @@ public class ToolsManager {
       IJdkDistributionProvider.getInstance().loadDistributions();
 
       writeNoMediaFile();
-      extractAndroidIdeGradlePlugin();
+      ensureGradleIntegrationCurrent();
       extractAapt2();
       extractToolingApi();
       extractAndroidJar();
       extractColorScheme(app);
-      writeInitScript();
       extractDownloadKtScript();
 
       deleteIdeenv();
@@ -81,13 +82,43 @@ public class ToolsManager {
     });
   }
 
-  private static void extractAndroidIdeGradlePlugin() {
-    if (Environment.ANDROIDIDE_GRADLE_PLUGIN_JAR.exists()) {
-      FileUtils.delete(Environment.ANDROIDIDE_GRADLE_PLUGIN_JAR);
+  /**
+   * Keeps the IDE-owned Gradle init script and plugin JAR in sync with the currently installed APK.
+   *
+   * Older builds only refreshed init.gradle.bak and left an existing init.gradle untouched. After
+   * an APK upgrade that stale script could keep resolving a commit-scoped tooling SNAPSHOT that no
+   * longer exists, making every project sync fail. This verifier is safe to call before each build:
+   * it performs the disk refresh at most once per process and only owns files under ~/.androidide.
+   */
+  public static synchronized void ensureGradleIntegrationCurrent() {
+    if (GRADLE_INTEGRATION_VERIFIED.get()) {
+      return;
     }
 
-    ResourceUtils.copyFileFromAssets(getCommonAsset("androidide-gradle-plugin.jar"),
-            Environment.ANDROIDIDE_GRADLE_PLUGIN_JAR.getAbsolutePath());
+    refreshAndroidIdeGradlePlugin();
+    refreshInitScript();
+    GRADLE_INTEGRATION_VERIFIED.set(true);
+  }
+
+  private static void refreshAndroidIdeGradlePlugin() {
+    final var target = Environment.ANDROIDIDE_GRADLE_PLUGIN_JAR;
+    final var temp = new File(target.getParentFile(), target.getName() + ".new");
+
+    FileUtils.delete(temp);
+    if (!ResourceUtils.copyFileFromAssets(
+        getCommonAsset("androidide-gradle-plugin.jar"),
+        temp.getAbsolutePath())) {
+      throw new IllegalStateException("Failed to extract AndroidIDE Gradle plugin from APK assets");
+    }
+
+    if (target.exists() && !FileUtils.delete(target)) {
+      FileUtils.delete(temp);
+      throw new IllegalStateException("Failed to replace stale AndroidIDE Gradle plugin");
+    }
+    if (!temp.renameTo(target)) {
+      FileUtils.delete(temp);
+      throw new IllegalStateException("Failed to activate AndroidIDE Gradle plugin");
+    }
   }
   
   private static void extractDownloadKtScript() {
@@ -229,14 +260,41 @@ public class ToolsManager {
         Environment.TOOLING_API_JAR.getAbsolutePath());
   }
 
-  private static void writeInitScript() {
+  private static void refreshInitScript() {
     final var initScript = Environment.INIT_SCRIPT;
     final var initScriptBak = new File(initScript.getParentFile(), initScript.getName() + ".bak");
+    final var initScriptNew = new File(initScript.getParentFile(), initScript.getName() + ".new");
     final var contents = readInitScript();
 
-    FilesKt.writeText(initScriptBak, contents, StandardCharsets.UTF_8);
-    if (!initScript.exists()) {
+    final String existing;
+    try {
+      existing = initScript.exists()
+          ? FilesKt.readText(initScript, StandardCharsets.UTF_8)
+          : "";
+    } catch (Throwable error) {
+      LOG.warn("Failed reading existing Gradle init script; replacing it", error);
+      FileUtils.delete(initScript);
       FilesKt.writeText(initScript, contents, StandardCharsets.UTF_8);
+      FilesKt.writeText(initScriptBak, contents, StandardCharsets.UTF_8);
+      return;
+    }
+
+    FilesKt.writeText(initScriptBak, contents, StandardCharsets.UTF_8);
+    if (contents.equals(existing)) {
+      return;
+    }
+
+    LOG.warn("Refreshing stale AndroidIDE Gradle init script after app/tooling upgrade");
+    FileUtils.delete(initScriptNew);
+    FilesKt.writeText(initScriptNew, contents, StandardCharsets.UTF_8);
+
+    if (initScript.exists() && !FileUtils.delete(initScript)) {
+      FileUtils.delete(initScriptNew);
+      throw new IllegalStateException("Failed to remove stale AndroidIDE Gradle init script");
+    }
+    if (!initScriptNew.renameTo(initScript)) {
+      FileUtils.delete(initScriptNew);
+      throw new IllegalStateException("Failed to activate refreshed AndroidIDE Gradle init script");
     }
   }
 
