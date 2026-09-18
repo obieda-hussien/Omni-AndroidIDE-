@@ -21,6 +21,7 @@ import dev.mutwakil.androidide.activities.editor.EditorHandlerActivity
 import dev.mutwakil.androidide.projects.ProjectManagerImpl
 import java.util.UUID
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.buildJsonObject
 
@@ -238,8 +239,9 @@ object OmniChatDialog {
                 if (needsTitle) conversations.markTitled(conversationId)
 
                 var streamed = false
-                client.runTask(request).collect { event ->
-                    when (event) {
+                try {
+                    client.runTask(request).collect { event ->
+                        when (event) {
                         is AgentTaskEvent.Started -> {
                             status.text = "Running • saved in Workspace as “" +
                                 event.conversationTitle + "”"
@@ -270,16 +272,20 @@ object OmniChatDialog {
                             append("\n⚠ " + event.message + "\n")
                             status.text = "Failed: " + event.code
                         }
-                        is AgentTaskEvent.Cancelled -> {
-                            append("\n[Cancelled]\n")
-                            status.text = "Cancelled"
+                            is AgentTaskEvent.Cancelled -> {
+                                append("\n[Cancelled]\n")
+                                status.text = "Cancelled"
+                            }
                         }
                     }
+                } catch (error: Exception) {
+                    append("\n⚠ " + (error.message ?: "Omni connection failed") + "\n")
+                    status.text = "Connection failed"
+                } finally {
+                    currentTaskId = null
+                    stop.isEnabled = false
+                    send.isEnabled = true
                 }
-
-                currentTaskId = null
-                stop.isEnabled = false
-                send.isEnabled = true
             }
         }
 
