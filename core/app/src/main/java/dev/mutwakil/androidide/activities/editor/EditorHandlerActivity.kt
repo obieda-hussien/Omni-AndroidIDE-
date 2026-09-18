@@ -181,7 +181,8 @@ open class EditorHandlerActivity : ProjectHandlerActivity(), IEditorHandler {
 	 * false). A clean buffer may still have undo history after [IDEEditor.markUnmodified] / save; we
 	 * reload anyway so external edits are not ignored. Never replaces buffers with unsaved edits.
 	 *
-	 * @param force If true, reloads even if the buffer is modified or the timestamp hasn't changed.
+	 * @param force If true, ignores the timestamp check for clean buffers. Dirty buffers are never
+	 * overwritten; unsaved editor content always wins until the user saves or reconciles it.
 	 */
 	fun checkForExternalFileChanges(force: Boolean = false) {
 		val openFiles = editorViewModel.getOpenedFiles()
@@ -196,7 +197,7 @@ open class EditorHandlerActivity : ProjectHandlerActivity(), IEditorHandler {
 					val newContent = runCatching { file.readText() }.getOrNull() ?: return@forEach
 					withContext(Dispatchers.Main) {
 						val editorView = getEditorForFile(file) ?: return@withContext
-						if (editorView.isModified && !force) return@withContext
+						if (editorView.isModified) return@withContext
 						val ideEditor = editorView.editor ?: return@withContext
 
 						ideEditor.setText(newContent)
