@@ -22,7 +22,6 @@ import dev.mutwakil.androidide.tooling.api.LogSenderConfig._PROPERTY_IS_TEST_ENV
 import dev.mutwakil.androidide.tooling.api.LogSenderConfig._PROPERTY_MAVEN_LOCAL_REPOSITORY
 import org.gradle.StartParameter
 import org.gradle.api.Plugin
-import org.gradle.api.artifacts.ExternalModuleDependency
 import org.gradle.api.artifacts.dsl.RepositoryHandler
 import org.gradle.api.initialization.Settings
 import org.gradle.api.invocation.Gradle
@@ -48,20 +47,14 @@ class AndroidIDEInitScriptPlugin : Plugin<Gradle> {
       settings.addDependencyRepositories()
     }
 
+    // The init script already loads androidide-gradle-plugin.jar from AndroidIDE's private
+    // ~/.androidide/plugin directory. Resolving the same plugin again from Maven makes internal
+    // builds depend on ephemeral SNAPSHOT artifacts and can stall project sync for minutes.
+    // Keep repository augmentation, but apply the plugin class directly from the init classloader.
     target.rootProject { rootProject ->
-      rootProject.buildscript.apply {
-        dependencies.apply {
-          val gradlePluginDep = rootProject.ideDependency(LIB_GROUP_TOOLING, "plugin")
-          if (gradlePluginDep is ExternalModuleDependency) {
-            // SNAPSHOT versions of gradle-plugin do not change
-            gradlePluginDep.isChanging = false
-          }
-
-          add("classpath", gradlePluginDep)
-        }
-
-        repositories.addDependencyRepositories(rootProject.gradle.startParameter)
-      }
+      rootProject.buildscript.repositories.addDependencyRepositories(
+        rootProject.gradle.startParameter
+      )
     }
 
     target.projectsLoaded { gradle ->
@@ -74,8 +67,11 @@ class AndroidIDEInitScriptPlugin : Plugin<Gradle> {
         }
 
         sub.afterEvaluate {
-          logger.info("Trying to apply plugin '${BuildInfo.MVN_GROUP_ID}' to project '${sub.path}'")
-          sub.pluginManager.apply(BuildInfo.MVN_GROUP_ID)
+          logger.info(
+            "Applying local AndroidIDE Gradle plugin to project '${sub.path}' " +
+              "without remote self-resolution"
+          )
+          sub.pluginManager.apply(AndroidIDEGradlePlugin::class.java)
         }
       }
     }
