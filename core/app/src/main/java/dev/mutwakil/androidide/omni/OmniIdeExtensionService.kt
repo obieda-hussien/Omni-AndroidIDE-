@@ -62,6 +62,8 @@ class OmniIdeExtensionService : ExtensionService() {
         private const val TAG = "OmniIdeExtension"
         private const val MIN_PROTOCOL = 3
         private const val MAX_PROTOCOL = 3
+        private val PACKAGE_ID_REGEX =
+            Regex("^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)+$")
     }
 
     private val json = Json {
@@ -279,9 +281,24 @@ class OmniIdeExtensionService : ExtensionService() {
     }
 
     private fun startCreateProjectJob(payload: JsonObject): ActionOutcome {
-        val projectName = payload.requiredString("project_name")
-        val packageId = payload.string("package_id")
-            ?: "com.example." + projectName.lowercase().replace(Regex("[^a-z0-9_]"), "")
+        val projectName = payload.requiredString("project_name").trim()
+        require(projectName.length in 1..80) { "Project name must be 1..80 characters" }
+        require(
+            projectName != "." &&
+                projectName != ".." &&
+                '/' !in projectName &&
+                '\\' !in projectName
+        ) { "Project name must not contain path separators or traversal segments" }
+
+        val fallbackSegment = projectName.lowercase()
+            .replace(Regex("[^a-z0-9_]"), "_")
+            .trim('_')
+            .ifBlank { "app" }
+            .let { if (it.first().isDigit()) "_$it" else it }
+        val packageId = payload.string("package_id") ?: "com.example.$fallbackSegment"
+        require(PACKAGE_ID_REGEX.matches(packageId)) {
+            "Invalid package id '$packageId'"
+        }
         val requestedTemplate = payload.string("template") ?: "Compose Activity"
         val templateName = when (requestedTemplate.lowercase()) {
             "compose", "compose activity", "jetpack compose" -> "Compose Activity"
@@ -294,16 +311,18 @@ class OmniIdeExtensionService : ExtensionService() {
         }
         val minSdk = (payload.int("min_sdk") ?: 24).coerceIn(21, 36)
         val useKts = payload.bool("use_kts") ?: true
-        val saveLocation = payload.string("save_location")
+        val saveLocation = (payload.string("save_location")
             ?.let(::File)
-            ?: Environment.PROJECTS_DIR
-        val projectDir = File(saveLocation, projectName)
-
+            ?: Environment.PROJECTS_DIR).canonicalFile
+        require(saveLocation.path.startsWith("/storage/")) {
+            "Project save location must be shared storage"
+        }
+        val projectDir = File(saveLocation, projectName).canonicalFile
+        require(projectDir.parentFile?.canonicalFile == saveLocation) {
+            "Project path must remain directly inside the selected save location"
+        }
         require(!projectDir.exists()) {
             "Project already exists: " + projectDir.absolutePath
-        }
-        require(saveLocation.canonicalPath.startsWith("/storage/")) {
-            "Project save location must be shared storage"
         }
 
         val template = TemplateRegistry.getTemplateByName(templateName)
