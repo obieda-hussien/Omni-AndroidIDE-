@@ -13,6 +13,7 @@ import dev.mutwakil.androidide.git.core.GitRepositoryManager
 import dev.mutwakil.androidide.projects.ProjectManagerImpl
 import java.io.File
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
@@ -606,6 +607,13 @@ object OmniIdeObservabilityBridge {
     private const val MAX_APP_LOG_CHARS = 220_000
     private val lock = Any()
     private val appLogs = StringBuilder()
+    private val observerEnabled = AtomicBoolean(false)
+
+    fun setObserverEnabled(enabled: Boolean) {
+        observerEnabled.set(enabled)
+    }
+
+    fun isObserverEnabled(): Boolean = observerEnabled.get()
 
     fun appendAppLog(line: String) {
         if (line.isBlank()) return
