@@ -72,11 +72,69 @@ object OmniIdeWorkspaceBridge {
         }
     }
 
+    suspend fun previewLinePatch(
+        path: String,
+        expectedRevision: String?,
+        hunks: List<LineHunk>
+    ): JsonObject {
+        val prepared = prepareLinePatch(path, expectedRevision, hunks)
+        val sourceLines = prepared.snapshot.text.split('\n')
+        val preview = buildString {
+            prepared.hunks.sortedBy { it.startLine }.forEachIndexed { index, hunk ->
+                if (index > 0) appendLine()
+                append("@@ lines ")
+                append(hunk.startLine)
+                append("..")
+                append(hunk.endLine)
+                appendLine(" @@")
+
+                if (hunk.endLine >= hunk.startLine) {
+                    val from = (hunk.startLine - 1).coerceAtLeast(0)
+                    val to = hunk.endLine.coerceAtMost(sourceLines.size)
+                    if (from < to) {
+                        sourceLines.subList(from, to).forEach { line ->
+                            append("- ").appendLine(line)
+                        }
+                    }
+                }
+                if (hunk.replacement.isNotEmpty()) {
+                    hunk.replacement.lineSequence().forEach { line ->
+                        append("+ ").appendLine(line)
+                    }
+                }
+            }
+        }.take(MAX_TEXT_RESULT_CHARS)
+
+        return buildJsonObject {
+            put("path", prepared.snapshot.file.absolutePath)
+            put("relativePath", relative(prepared.snapshot.file))
+            put("revision", prepared.actualRevision)
+            put("nextRevision", OmniIdeStateBridge.sha256(prepared.updated))
+            put("hunkCount", prepared.hunks.size)
+            put("preview", preview)
+            put("updatedChars", prepared.updated.length)
+            put("previewTruncated", preview.length >= MAX_TEXT_RESULT_CHARS)
+        }
+    }
+
     suspend fun applyLinePatch(
         path: String,
         expectedRevision: String?,
         hunks: List<LineHunk>
     ): JsonObject {
+        val prepared = prepareLinePatch(path, expectedRevision, hunks)
+        return OmniIdeStateBridge.writeFile(
+            path = prepared.snapshot.file.absolutePath,
+            content = prepared.updated,
+            expectedRevision = prepared.actualRevision
+        )
+    }
+
+    private suspend fun prepareLinePatch(
+        path: String,
+        expectedRevision: String?,
+        hunks: List<LineHunk>
+    ): PreparedLinePatch {
         require(hunks.isNotEmpty()) { "At least one patch hunk is required" }
         val snapshot = snapshot(path)
         val actualRevision = OmniIdeStateBridge.sha256(snapshot.text)
@@ -110,7 +168,8 @@ object OmniIdeWorkspaceBridge {
             previousStart = hunk.startLine
 
             val startIndex = hunk.startLine - 1
-            val deleteCount = if (hunk.endLine < hunk.startLine) 0 else hunk.endLine - hunk.startLine + 1
+            val deleteCount =
+                if (hunk.endLine < hunk.startLine) 0 else hunk.endLine - hunk.startLine + 1
             repeat(deleteCount) { lines.removeAt(startIndex) }
 
             val replacementLines = if (hunk.replacement.isEmpty()) {
@@ -121,11 +180,11 @@ object OmniIdeWorkspaceBridge {
             lines.addAll(startIndex, replacementLines)
         }
 
-        val updated = lines.joinToString("\n")
-        return OmniIdeStateBridge.writeFile(
-            path = snapshot.file.absolutePath,
-            content = updated,
-            expectedRevision = actualRevision
+        return PreparedLinePatch(
+            snapshot = snapshot,
+            actualRevision = actualRevision,
+            updated = lines.joinToString("\n"),
+            hunks = hunks
         )
     }
 
@@ -456,6 +515,13 @@ object OmniIdeWorkspaceBridge {
         val startLine: Int,
         val endLine: Int,
         val replacement: String
+    )
+
+    private data class PreparedLinePatch(
+        val snapshot: TextSnapshot,
+        val actualRevision: String,
+        val updated: String,
+        val hunks: List<LineHunk>
     )
 
     private suspend fun snapshot(path: String): TextSnapshot {
