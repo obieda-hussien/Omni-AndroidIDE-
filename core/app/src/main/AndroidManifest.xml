@@ -11,6 +11,13 @@
     android:protectionLevel="normal"
     tools:ignore="ManifestOrder" />
 
+  <queries>
+    <intent>
+      <action android:name="com.omnilink.sdk.action.AGENT_GATEWAY_BIND" />
+    </intent>
+  </queries>
+
+  <uses-permission android:name="com.omnilink.sdk.permission.BIND_AGENT" />
   <uses-permission android:name="dev.mutwakil.androidide.permission.BIND_LOG_SERVICE" />
   <uses-permission android:name="android.permission.INTERNET" />
   <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -127,6 +134,15 @@
     <service
       android:exported="false"
       android:name=".services.builder.GradleBuildService" />
+
+    <service
+      android:name=".omni.OmniIdeExtensionService"
+      android:exported="true"
+      android:permission="com.omnilink.sdk.permission.BIND_EXTENSION">
+      <intent-filter>
+        <action android:name="com.omnilink.sdk.action.EXTENSION_BIND" />
+      </intent-filter>
+    </service>
 
     <service
       android:exported="true"
