@@ -37,6 +37,7 @@ import kotlinx.coroutines.future.await
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -238,7 +239,9 @@ class OmniIdeExtensionService : ExtensionService() {
     ): ActionOutcome {
         val root = OmniIdeStateBridge.projectRoot()
         return startJob(kind, buildJsonObject {
-            put("tasks", buildJsonArray { tasks.forEach(::add) })
+            put("tasks", buildJsonArray {
+                tasks.forEach { task -> add(JsonPrimitive(task)) }
+            })
             put("project_root", root.absolutePath)
         }) { id ->
             val result = buildController.executeTasks(root, tasks, forceSync)
