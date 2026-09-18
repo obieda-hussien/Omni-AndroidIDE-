@@ -252,6 +252,7 @@ dependencies {
     implementation(projects.java.lsp)
     implementation(projects.logging.idestats)
     implementation(projects.logging.logsender)
+    implementation(projects.logging.logger)
     implementation(projects.termux.application)
     implementation(projects.termux.view)
     implementation(projects.termux.emulator)
@@ -286,7 +287,6 @@ dependencies {
     // So we always copy the latest JAR file to assets
     compileOnly(projects.tooling.impl)
 
-    implementation(projects.logging.logsender)
 
     // Sentry Android SDK (core + replay for quality configuration)
 //  implementation(libs.sentry.core)
