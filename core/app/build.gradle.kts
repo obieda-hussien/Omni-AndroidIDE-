@@ -108,7 +108,8 @@ android {
 
     buildTypes {
         release {
-            signingConfigs.findByName("omniSharedRelease")
+            (signingConfigs.findByName("omniSharedRelease")
+                ?: signingConfigs.findByName("omniSharedDebug"))
                 ?.let { signingConfig = it }
             isShrinkResources = true
             manifestPlaceholders["sentryDsn"] = ""
