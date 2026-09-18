@@ -17,6 +17,8 @@
 
 @file:Suppress("UnstableApiUsage")
 
+import java.util.Properties
+
 import dev.mutwakil.androidide.build.config.BuildConfig
 import dev.mutwakil.androidide.desugaring.utils.JavaIOReplacements.applyJavaIOReplacements
 import dev.mutwakil.androidide.plugins.AndroidIDEAssetsPlugin
@@ -31,9 +33,11 @@ plugins {
     id("dev.mutwakil.androidide.desugaring")
 }
 
-val omniLocalProperties = java.util.Properties().apply {
+val omniLocalProperties = Properties().apply {
     val local = rootProject.file("local.properties")
-    if (local.isFile) local.inputStream().use(::load)
+    if (local.isFile) {
+        local.inputStream().use { stream -> load(stream) }
+    }
 }
 
 fun omniSigningValue(name: String): String? =
