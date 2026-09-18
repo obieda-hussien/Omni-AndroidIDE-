@@ -19,7 +19,6 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 /**
@@ -47,7 +46,7 @@ class OmniAgentClient(private val context: Context) {
         val callback = object : IOmniAgentCallback.Stub() {
             override fun onEvent(eventJson: String) {
                 val event = runCatching {
-                    json.decodeFromString<AgentTaskEvent>(eventJson)
+                    json.decodeFromString(AgentTaskEvent.serializer(), eventJson)
                 }.getOrElse { error ->
                     AgentTaskEvent.Error(
                         taskId = request.taskId,
@@ -71,7 +70,7 @@ class OmniAgentClient(private val context: Context) {
         try {
             connect().startAgentTask(
                 OmniLinkConstants.CURRENT_PROTOCOL_VERSION,
-                json.encodeToString(request),
+                json.encodeToString(AgentTaskRequest.serializer(), request),
                 callback
             )
         } catch (error: Exception) {
