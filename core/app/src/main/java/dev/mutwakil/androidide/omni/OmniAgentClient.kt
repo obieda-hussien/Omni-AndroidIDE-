@@ -229,6 +229,18 @@ class OmniAgentClient(private val context: Context) {
 }
 
 class OmniConversationStore(context: Context) {
+    data class ConversationSummary(
+        val id: String,
+        val title: String,
+        val updatedAt: Long
+    )
+
+    companion object {
+        private const val MAX_TRANSCRIPT_CHARS = 80_000
+        private const val MAX_PROJECT_HISTORY = 40
+        private const val HISTORY_SEPARATOR = "|"
+    }
+
     private val prefs = context.applicationContext.getSharedPreferences(
         "omni_androidide_conversations",
         Context.MODE_PRIVATE
@@ -236,27 +248,143 @@ class OmniConversationStore(context: Context) {
 
     fun current(projectRoot: String): String {
         val key = projectKey(projectRoot)
-        return prefs.getString(key, null) ?: newConversation(projectRoot)
+        val existing = prefs.getString(key, null)
+        if (!existing.isNullOrBlank()) {
+            ensureInHistory(projectRoot, existing)
+            return existing
+        }
+        return newConversation(projectRoot)
     }
 
     fun newConversation(projectRoot: String): String {
         val id = "androidide-" + UUID.randomUUID()
+        val now = System.currentTimeMillis()
         prefs.edit()
             .putString(projectKey(projectRoot), id)
-            .remove(titleKey(id))
+            .remove(titledKey(id))
+            .putString(titleKey(id), "New chat")
+            .putLong(updatedKey(id), now)
+            .putString(transcriptKey(id), "")
             .apply()
+        updateHistory(projectRoot, listOf(id) + historyIds(projectRoot))
         return id
     }
 
-    fun needsTitle(conversationId: String): Boolean =
-        !prefs.getBoolean(titleKey(conversationId), false)
+    fun list(projectRoot: String): List<ConversationSummary> =
+        historyIds(projectRoot)
+            .map { id ->
+                ConversationSummary(
+                    id = id,
+                    title = title(id),
+                    updatedAt = prefs.getLong(updatedKey(id), 0L)
+                )
+            }
+            .sortedByDescending { it.updatedAt }
 
-    fun markTitled(conversationId: String) {
-        prefs.edit().putBoolean(titleKey(conversationId), true).apply()
+    fun select(projectRoot: String, conversationId: String) {
+        prefs.edit().putString(projectKey(projectRoot), conversationId).apply()
+        touch(projectRoot, conversationId)
     }
 
-    private fun projectKey(projectRoot: String): String =
-        "current_" + OmniIdeStateBridge.sha256(projectRoot).take(24)
+    fun needsTitle(conversationId: String): Boolean =
+        !prefs.getBoolean(titledKey(conversationId), false)
 
-    private fun titleKey(conversationId: String): String = "titled_$conversationId"
+    fun markTitled(conversationId: String) {
+        prefs.edit().putBoolean(titledKey(conversationId), true).apply()
+    }
+
+    fun setTitle(projectRoot: String, conversationId: String, title: String) {
+        val clean = title.trim().replace(Regex("\\s+"), " ").take(72)
+            .ifBlank { "AndroidIDE conversation" }
+        prefs.edit()
+            .putString(titleKey(conversationId), clean)
+            .putBoolean(titledKey(conversationId), true)
+            .putLong(updatedKey(conversationId), System.currentTimeMillis())
+            .apply()
+        touch(projectRoot, conversationId)
+    }
+
+    fun title(conversationId: String): String =
+        prefs.getString(titleKey(conversationId), null)
+            ?.takeIf { it.isNotBlank() }
+            ?: "AndroidIDE conversation"
+
+    fun transcript(conversationId: String): String =
+        prefs.getString(transcriptKey(conversationId), "").orEmpty()
+
+    fun saveTranscript(projectRoot: String, conversationId: String, text: String) {
+        val bounded = if (text.length <= MAX_TRANSCRIPT_CHARS) {
+            text
+        } else {
+            "… [older local transcript trimmed]\n" +
+                text.takeLast(MAX_TRANSCRIPT_CHARS - 36)
+        }
+        prefs.edit()
+            .putString(transcriptKey(conversationId), bounded)
+            .putLong(updatedKey(conversationId), System.currentTimeMillis())
+            .apply()
+        touch(projectRoot, conversationId)
+    }
+
+    fun remove(projectRoot: String, conversationId: String) {
+        val remaining = historyIds(projectRoot).filterNot { it == conversationId }
+        val current = prefs.getString(projectKey(projectRoot), null)
+        val editor = prefs.edit()
+            .remove(titleKey(conversationId))
+            .remove(titledKey(conversationId))
+            .remove(updatedKey(conversationId))
+            .remove(transcriptKey(conversationId))
+
+        if (current == conversationId) {
+            editor.remove(projectKey(projectRoot))
+        }
+        editor.apply()
+        updateHistory(projectRoot, remaining)
+    }
+
+    private fun touch(projectRoot: String, conversationId: String) {
+        val ordered = listOf(conversationId) +
+            historyIds(projectRoot).filterNot { it == conversationId }
+        prefs.edit()
+            .putLong(updatedKey(conversationId), System.currentTimeMillis())
+            .apply()
+        updateHistory(projectRoot, ordered)
+    }
+
+    private fun ensureInHistory(projectRoot: String, conversationId: String) {
+        if (conversationId !in historyIds(projectRoot)) {
+            updateHistory(projectRoot, listOf(conversationId) + historyIds(projectRoot))
+        }
+    }
+
+    private fun updateHistory(projectRoot: String, ids: List<String>) {
+        val normalized = ids
+            .asSequence()
+            .filter { it.isNotBlank() }
+            .distinct()
+            .take(MAX_PROJECT_HISTORY)
+            .toList()
+        prefs.edit()
+            .putString(historyKey(projectRoot), normalized.joinToString(HISTORY_SEPARATOR))
+            .apply()
+    }
+
+    private fun historyIds(projectRoot: String): List<String> =
+        prefs.getString(historyKey(projectRoot), "").orEmpty()
+            .split(HISTORY_SEPARATOR)
+            .filter { it.isNotBlank() }
+
+    private fun projectHash(projectRoot: String): String =
+        OmniIdeStateBridge.sha256(projectRoot).take(24)
+
+    private fun projectKey(projectRoot: String): String =
+        "current_" + projectHash(projectRoot)
+
+    private fun historyKey(projectRoot: String): String =
+        "history_" + projectHash(projectRoot)
+
+    private fun titleKey(conversationId: String): String = "title_$conversationId"
+    private fun titledKey(conversationId: String): String = "titled_$conversationId"
+    private fun updatedKey(conversationId: String): String = "updated_$conversationId"
+    private fun transcriptKey(conversationId: String): String = "transcript_$conversationId"
 }
