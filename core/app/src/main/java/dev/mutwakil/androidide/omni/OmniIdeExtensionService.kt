@@ -135,6 +135,8 @@ class OmniIdeExtensionService : ExtensionService() {
         capability("ide.get_app_logs", "Read/filter recent app-under-test logs captured through AndroidIDE LogSender.", CapabilityExecutionMode.IMMEDIATE),
         capability("ide.clear_app_logs", "Clear Omni's bounded app-log mirror without affecting AndroidIDE's normal Logs UI.", CapabilityExecutionMode.IMMEDIATE),
         capability("ide.get_diagnostics", "Return bounded project-sync and latest build diagnostics.", CapabilityExecutionMode.IMMEDIATE),
+        capability("ide.get_active_diagnostics", "Run the active editor's native language-server analysis and return structured diagnostics.", CapabilityExecutionMode.ASYNC),
+        capability("ide.health", "Inspect project/tooling/build/Git/logging readiness and IDE-owned Gradle integration health.", CapabilityExecutionMode.ASYNC),
 
         capability("ide.git_status", "Read native JGit status, branch, conflicts, staged/unstaged/untracked files and local-ahead count.", CapabilityExecutionMode.ASYNC),
         capability("ide.git_diff", "Read a bounded JGit diff for one project file.", CapabilityExecutionMode.ASYNC),
@@ -143,6 +145,10 @@ class OmniIdeExtensionService : ExtensionService() {
         capability("ide.git_stage", "Stage selected project paths with AndroidIDE JGit.", CapabilityExecutionMode.ASYNC, destructive = true),
         capability("ide.git_commit", "Create a local Git commit from the current index.", CapabilityExecutionMode.ASYNC, destructive = true),
         capability("ide.git_checkout", "Checkout or create a local/tracking branch.", CapabilityExecutionMode.ASYNC, destructive = true),
+        capability("ide.git_pull", "Pull a remote using AndroidIDE's encrypted stored Git credentials when available.", CapabilityExecutionMode.ASYNC, destructive = true),
+        capability("ide.git_push", "Push to a remote using AndroidIDE's encrypted stored Git credentials; credentials never cross OmniLink.", CapabilityExecutionMode.ASYNC, destructive = true),
+        capability("ide.git_merge", "Merge a branch into the current branch using native JGit.", CapabilityExecutionMode.ASYNC, destructive = true),
+        capability("ide.git_abort_merge", "Abort the current conflicted merge and restore HEAD.", CapabilityExecutionMode.ASYNC, destructive = true),
 
         capability("ide.sync_project", "Synchronize project through AndroidIDE's Tooling API.", CapabilityExecutionMode.JOB, streaming = true),
         capability("ide.start_build", "Execute Gradle build tasks through AndroidIDE's Tooling API.", CapabilityExecutionMode.JOB, streaming = true),
@@ -245,6 +251,10 @@ class OmniIdeExtensionService : ExtensionService() {
                 "ide.get_diagnostics" -> success(
                     OmniIdeWorkspaceBridge.diagnostics(payload.int("limit") ?: 120)
                 )
+                "ide.get_active_diagnostics" -> success(
+                    OmniIdeWorkspaceBridge.activeLspDiagnostics(payload.int("limit") ?: 120)
+                )
+                "ide.health" -> success(OmniIdeWorkspaceBridge.health())
                 "ide.git_status" -> success(OmniIdeWorkspaceBridge.gitStatus())
                 "ide.git_diff" -> success(
                     OmniIdeWorkspaceBridge.gitDiff(payload.requiredString("path"))
@@ -270,6 +280,16 @@ class OmniIdeExtensionService : ExtensionService() {
                         startPoint = payload.string("start_point")
                     )
                 )
+                "ide.git_pull" -> success(
+                    OmniIdeWorkspaceBridge.gitPull(payload.string("remote").orEmpty())
+                )
+                "ide.git_push" -> success(
+                    OmniIdeWorkspaceBridge.gitPush(payload.string("remote").orEmpty())
+                )
+                "ide.git_merge" -> success(
+                    OmniIdeWorkspaceBridge.gitMerge(payload.requiredString("branch"))
+                )
+                "ide.git_abort_merge" -> success(OmniIdeWorkspaceBridge.gitAbortMerge())
                 "ide.read_file" -> success(
                     OmniIdeStateBridge.readFile(payload.requiredString("path"))
                 )
