@@ -17,6 +17,16 @@
     </intent>
   </queries>
 
+  <!-- Workspace is the single permission owner. Remove identical declarations contributed
+       by the SDK library so independently-signed development APKs can still be installed; a
+       shared Omni signing key is still required for the signature permission to be granted. -->
+  <permission
+    android:name="com.omnilink.sdk.permission.BIND_EXTENSION"
+    tools:node="remove" />
+  <permission
+    android:name="com.omnilink.sdk.permission.BIND_AGENT"
+    tools:node="remove" />
+
   <uses-permission android:name="com.omnilink.sdk.permission.BIND_AGENT" />
   <uses-permission android:name="dev.mutwakil.androidide.permission.BIND_LOG_SERVICE" />
   <uses-permission android:name="android.permission.INTERNET" />
