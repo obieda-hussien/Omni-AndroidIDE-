@@ -24,6 +24,7 @@ import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import dev.mutwakil.androidide.logsender.LogSender
 import dev.mutwakil.androidide.lookup.Lookup
 import dev.mutwakil.androidide.models.LogLine
+import dev.mutwakil.androidide.omni.OmniIdeObservabilityBridge
 import dev.mutwakil.androidide.preferences.internal.DevOpsPreferences
 import org.slf4j.LoggerFactory
 import java.util.concurrent.Executors
@@ -89,10 +90,12 @@ class LogReceiverService : Service() {
     }
 
     log.debug("Accepting bind request...")
-    return startBinderAndGet().also {
-      if (!isBoundToConsumer.get()) {
+    return startBinderAndGet().also { receiver ->
+      if (OmniIdeObservabilityBridge.isObserverEnabled()) {
+        receiver.startReaders()
+      } else if (!isBoundToConsumer.get()) {
         // listen for consumers to bind to the service for next LOG_CONSUMER_WAIT_DURATION
-        // if the consumer still does not connect, disconnect from all senders and stop the service
+        // if neither the UI nor Omni observes logs, disconnect senders.
         listenForConsumer()
       }
     }
@@ -124,6 +127,15 @@ class LogReceiverService : Service() {
     Lookup.getDefault().unregister(LOOKUP_KEY)
   }
 
+  fun setOmniObserverEnabled(enabled: Boolean) {
+    OmniIdeObservabilityBridge.setObserverEnabled(enabled)
+    if (enabled) {
+      startBinderAndGet().startReaders()
+    } else if (!isBoundToConsumer.get()) {
+      listenForConsumer()
+    }
+  }
+
   fun setConsumer(consumer: ((LogLine) -> Unit)?) {
     binder.consumer = consumer
   }
@@ -137,8 +149,8 @@ class LogReceiverService : Service() {
   private fun listenForConsumer() {
     log.debug("Waiting for log consumer...")
     scheduledExecutor.schedule({
-      if (!isBoundToConsumer.get()) {
-        // ask senders to disconnect
+      if (!isBoundToConsumer.get() && !OmniIdeObservabilityBridge.isObserverEnabled()) {
+        // ask senders to disconnect only when there is no UI or headless Omni observer.
         log.debug("No log consumer has been bound to the log receiver service")
         binder.disconnectAll()
       }
