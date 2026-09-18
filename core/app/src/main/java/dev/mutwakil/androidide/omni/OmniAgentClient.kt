@@ -237,6 +237,7 @@ class OmniConversationStore(context: Context) {
 
     companion object {
         private const val MAX_TRANSCRIPT_CHARS = 80_000
+        private const val MAX_CONSOLE_CHARS = 80_000
         private const val MAX_PROJECT_HISTORY = 40
         private const val HISTORY_SEPARATOR = "|"
     }
@@ -265,6 +266,7 @@ class OmniConversationStore(context: Context) {
             .putString(titleKey(id), "New chat")
             .putLong(updatedKey(id), now)
             .putString(transcriptKey(id), "")
+            .putString(consoleKey(id), "")
             .apply()
         updateHistory(projectRoot, listOf(id) + historyIds(projectRoot))
         return id
@@ -312,6 +314,18 @@ class OmniConversationStore(context: Context) {
     fun transcript(conversationId: String): String =
         prefs.getString(transcriptKey(conversationId), "").orEmpty()
 
+    fun console(conversationId: String): String =
+        prefs.getString(consoleKey(conversationId), "").orEmpty()
+
+    fun saveConsole(projectRoot: String, conversationId: String, text: String) {
+        val bounded = text.takeLast(MAX_CONSOLE_CHARS)
+        prefs.edit()
+            .putString(consoleKey(conversationId), bounded)
+            .putLong(updatedKey(conversationId), System.currentTimeMillis())
+            .apply()
+        touch(projectRoot, conversationId)
+    }
+
     fun saveTranscript(projectRoot: String, conversationId: String, text: String) {
         val bounded = if (text.length <= MAX_TRANSCRIPT_CHARS) {
             text
@@ -334,6 +348,7 @@ class OmniConversationStore(context: Context) {
             .remove(titledKey(conversationId))
             .remove(updatedKey(conversationId))
             .remove(transcriptKey(conversationId))
+            .remove(consoleKey(conversationId))
 
         if (current == conversationId) {
             editor.remove(projectKey(projectRoot))
@@ -387,4 +402,5 @@ class OmniConversationStore(context: Context) {
     private fun titledKey(conversationId: String): String = "titled_$conversationId"
     private fun updatedKey(conversationId: String): String = "updated_$conversationId"
     private fun transcriptKey(conversationId: String): String = "transcript_$conversationId"
+    private fun consoleKey(conversationId: String): String = "console_$conversationId"
 }
