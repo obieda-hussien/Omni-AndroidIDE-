@@ -52,6 +52,8 @@ import dev.mutwakil.androidide.models.OpenedFile
 import dev.mutwakil.androidide.models.OpenedFilesCache
 import dev.mutwakil.androidide.models.Range
 import dev.mutwakil.androidide.models.SaveResult
+import dev.mutwakil.androidide.omni.OmniChatDialog
+import dev.mutwakil.androidide.omni.OmniIdeStateBridge
 import dev.mutwakil.androidide.preferences.internal.GeneralPreferences
 import dev.mutwakil.androidide.projects.ProjectManagerImpl
 import dev.mutwakil.androidide.tasks.executeAsync
@@ -100,6 +102,7 @@ open class EditorHandlerActivity : ProjectHandlerActivity(), IEditorHandler {
   }
 
   override fun preDestroy() {
+    OmniIdeStateBridge.detach(this)
     super.preDestroy()
     TSLanguageRegistry.instance.destroy()
     editorViewModel.removeAllFiles()
@@ -108,6 +111,7 @@ open class EditorHandlerActivity : ProjectHandlerActivity(), IEditorHandler {
   override fun onCreate(savedInstanceState: Bundle?) {
     mBuildEventListener.setActivity(this)
     super.onCreate(savedInstanceState)
+    OmniIdeStateBridge.attach(this)
 
     editorViewModel._displayedFile.observe(
       this) { this.content.editorContainer.displayedChild = it }
@@ -166,6 +170,7 @@ open class EditorHandlerActivity : ProjectHandlerActivity(), IEditorHandler {
 
   override fun onResume() {
     super.onResume()
+    OmniIdeStateBridge.attach(this)
     isOpenedFilesSaved.set(false)
     checkForExternalFileChanges()
   }
@@ -257,6 +262,15 @@ open class EditorHandlerActivity : ProjectHandlerActivity(), IEditorHandler {
 
     val data = createToolbarActionData()
     getInstance().fillMenu(FillMenuParams(data, EDITOR_TOOLBAR, menu))
+
+    menu.add(Menu.NONE, 0x4F4D4E49, Menu.NONE, "Omni").apply {
+      setIcon(dev.mutwakil.androidide.R.drawable.ic_omni_agent)
+      setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
+      setOnMenuItemClickListener {
+        OmniChatDialog.show(this@EditorHandlerActivity)
+        true
+      }
+    }
     return true
   }
 
