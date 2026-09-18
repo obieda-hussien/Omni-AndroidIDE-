@@ -30,6 +30,7 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -371,7 +372,7 @@ class OmniIdeExtensionService : ExtensionService() {
         )
         jobRecords[id] = record
 
-        val job = scope.launch {
+        val job = scope.launch(start = CoroutineStart.LAZY) {
             jobRecords.computeIfPresent(id) { _, old -> old.copy(state = "RUNNING") }
             publishJob(id)
             try {
@@ -384,7 +385,7 @@ class OmniIdeExtensionService : ExtensionService() {
                     error = error.message ?: error.javaClass.simpleName
                 )
             } finally {
-                runningJobs.remove(id)
+                runningJobs.remove(id, job)
                 if (exclusiveGradle) {
                     activeGradleJobId.compareAndSet(id, null)
                 }
@@ -392,6 +393,7 @@ class OmniIdeExtensionService : ExtensionService() {
         }
         runningJobs[id] = job
         publishJob(id)
+        job.start()
 
         return success(buildJsonObject {
             put("job_id", id)
