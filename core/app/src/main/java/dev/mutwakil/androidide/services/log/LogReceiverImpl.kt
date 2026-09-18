@@ -138,6 +138,7 @@ class LogReceiverImpl(
       senders.getPendingSenders().forEach { sender ->
         log.info("Notifying sender '{}' to start reading logs...", sender.packageName)
         sender.startReader(sender.port)
+        sender.isStarted = true
       }
     }
   }
