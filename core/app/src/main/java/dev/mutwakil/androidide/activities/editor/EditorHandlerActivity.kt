@@ -292,6 +292,10 @@ open class EditorHandlerActivity : ProjectHandlerActivity(), IEditorHandler {
   }
 
   private fun configureOmniWorkspaceDrawer() {
+    binding.editorDrawerLayout.childId = binding.swipeReveal.id
+    binding.editorDrawerLayout.translationBehaviorEnd =
+      dev.mutwakil.androidide.ui.ContentTranslatingDrawerLayout.TranslationBehavior.DEFAULT
+
     val density = resources.displayMetrics.density
     val screenWidth = resources.displayMetrics.widthPixels
     val maxWidth = (600f * density).toInt()
