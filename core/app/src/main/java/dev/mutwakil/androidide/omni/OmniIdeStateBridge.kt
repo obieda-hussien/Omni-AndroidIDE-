@@ -125,11 +125,26 @@ object OmniIdeStateBridge {
         }
     }
 
+    private suspend fun openDocument(file: File): JsonObject? =
+        withContext(Dispatchers.Main.immediate) {
+            val view = activeActivity()?.getEditorForFile(file) ?: return@withContext null
+            val editor = view.editor ?: return@withContext null
+            val editorFile = editor.file ?: return@withContext null
+            val content = editor.text?.toString().orEmpty()
+            buildJsonObject {
+                put("path", editorFile.absolutePath)
+                put("relativePath", relativeToProject(editorFile))
+                put("dirty", view.isModified)
+                put("revision", sha256(content))
+                put("content", content.take(MAX_ACTIVE_DOCUMENT_CHARS))
+                put("contentTruncated", content.length > MAX_ACTIVE_DOCUMENT_CHARS)
+                put("totalChars", content.length)
+            }
+        }
+
     suspend fun readFile(path: String): JsonObject {
         val file = resolveProjectPath(path)
-        val active = activeDocument()
-        val activePath = active?.get("path")?.toString()?.trim('"')
-        if (activePath == file.absolutePath) return active
+        openDocument(file)?.let { return it }
 
         val content = withContext(Dispatchers.IO) { file.readText() }
         return buildJsonObject {
@@ -155,18 +170,17 @@ object OmniIdeStateBridge {
         }
 
         val file = resolveProjectPath(path)
-        val active = activeDocument()
-        val activePath = active?.get("path")?.toString()?.trim('"')
-        val activeDirty = active?.get("dirty")?.toString()?.toBooleanStrictOrNull() == true
+        val open = openDocument(file)
+        val openDirty = open?.get("dirty")?.toString()?.toBooleanStrictOrNull() == true
 
-        if (activePath == file.absolutePath && activeDirty) {
+        if (openDirty) {
             throw IllegalStateException(
                 "Refusing to overwrite a dirty editor buffer. Save/reconcile the document first."
             )
         }
 
-        val before = if (activePath == file.absolutePath) {
-            active?.get("revision")?.toString()?.trim('"').orEmpty()
+        val before = if (open != null) {
+            open["revision"]?.toString()?.trim('"').orEmpty()
         } else if (file.exists()) {
             withContext(Dispatchers.IO) { sha256(file.readText()) }
         } else {
