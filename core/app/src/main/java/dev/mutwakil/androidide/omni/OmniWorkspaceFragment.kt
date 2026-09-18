@@ -369,6 +369,7 @@ class OmniWorkspaceFragment : Fragment() {
                         }
                     }
                     store.saveTranscript(projectRoot, conversationId, transcript.text.toString())
+                    store.saveConsole(projectRoot, conversationId, console.text.toString())
                 }
             } catch (error: Exception) {
                 appendChat("\n⚠ ${error.message ?: "Omni connection failed"}\n")
@@ -379,6 +380,7 @@ class OmniWorkspaceFragment : Fragment() {
                 stop.isEnabled = false
                 send.isEnabled = true
                 store.saveTranscript(projectRoot, conversationId, transcript.text.toString())
+                store.saveConsole(projectRoot, conversationId, console.text.toString())
                 refreshHistory()
             }
         }
@@ -412,7 +414,7 @@ class OmniWorkspaceFragment : Fragment() {
         conversationId = id
         store.select(projectRoot, id)
         transcript.text = store.transcript(id)
-        console.text = ""
+        console.text = store.console(id)
         status.text = store.title(id)
         refreshHistory()
         transcriptScroll.post { transcriptScroll.fullScroll(View.FOCUS_DOWN) }
