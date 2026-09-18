@@ -122,7 +122,7 @@ configurations.configureEach {
 
 dependencies {
     // OmniLink: AndroidIDE is both an Omni capability provider and an embedded-agent client.
-    implementation("com.github.obieda-hussien:OmniLinkSDK:35c4e540f0b91917f9ece57d245202195df1d20c")
+    implementation("com.github.obieda-hussien:OmniLinkSDK:68c838da3d3591aef0177b8f5ac8a3a187b84b7b")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 
     implementation(libs.androidx.room.ktx)
