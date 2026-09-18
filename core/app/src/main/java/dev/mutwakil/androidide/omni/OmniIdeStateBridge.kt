@@ -23,9 +23,13 @@ import kotlinx.serialization.json.put
  * overwrite a dirty editor buffer. External edits are then reloaded through AndroidIDE's own refresh path.
  */
 object OmniIdeStateBridge {
-    private const val MAX_BUILD_OUTPUT_CHARS = 220_000
-    private const val MAX_ACTIVE_DOCUMENT_CHARS = 180_000
-    private const val MAX_LIST_FILES = 2_000
+    private const val MAX_BUILD_OUTPUT_CHARS = 180_000
+    private const val MAX_CONTEXT_BUILD_OUTPUT_CHARS = 40_000
+    private const val MAX_ACTIVE_DOCUMENT_CHARS = 120_000
+    private const val MAX_FILE_CONTENT_CHARS = 220_000
+    private const val MAX_WRITE_CONTENT_CHARS = 220_000
+    private const val MAX_LIST_FILES = 1_500
+    private const val MAX_LIST_PATH_CHARS = 120_000
 
     private val outputLock = Any()
     private val buildOutput = StringBuilder()
@@ -79,7 +83,7 @@ object OmniIdeStateBridge {
             put("projectInitialized", manager.workspace != null)
             put("buildInProgress", service?.isBuildInProgress == true)
             put("toolingServerStarted", service?.isToolingServerStarted() == true)
-            put("buildOutputTail", buildOutputSnapshot())
+            put("buildOutputTail", buildOutputSnapshot(MAX_CONTEXT_BUILD_OUTPUT_CHARS))
             put("syncIssues", buildJsonArray {
                 manager.projectSyncIssues.take(100).forEach { issue ->
                     add(JsonPrimitive(issue.toString()))
@@ -122,6 +126,12 @@ object OmniIdeStateBridge {
     }
 
     suspend fun readFile(path: String): JsonObject {
+        require(content.length <= MAX_WRITE_CONTENT_CHARS) {
+            "File replacement is too large for safe Binder transport (" +
+                content.length + " chars; max " + MAX_WRITE_CONTENT_CHARS +
+                "). Use targeted edits or split the change into smaller operations."
+        }
+
         val file = resolveProjectPath(path)
         val active = activeDocument()
         val activePath = active?.get("path")?.toString()?.trim('"')
@@ -133,8 +143,9 @@ object OmniIdeStateBridge {
             put("relativePath", relativeToProject(file))
             put("dirty", false)
             put("revision", sha256(content))
-            put("content", content)
-            put("contentTruncated", false)
+            put("content", content.take(MAX_FILE_CONTENT_CHARS))
+            put("contentTruncated", content.length > MAX_FILE_CONTENT_CHARS)
+            put("totalChars", content.length)
         }
     }
 
@@ -192,13 +203,25 @@ object OmniIdeStateBridge {
         val capped = limit.coerceIn(1, MAX_LIST_FILES)
         val project = projectRoot()
 
-        val paths = withContext(Dispatchers.IO) {
-            root.walkTopDown()
+        val (paths, truncatedByBudget) = withContext(Dispatchers.IO) {
+            val result = ArrayList<String>(minOf(capped, 256))
+            var pathChars = 0
+            var budgetExceeded = false
+            val iterator = root.walkTopDown()
                 .onEnter { dir -> dir.name !in setOf(".gradle", "build", ".git") }
                 .filter { it.isFile }
-                .take(capped)
-                .map { it.relativeTo(project).invariantSeparatorsPath }
-                .toList()
+                .iterator()
+
+            while (iterator.hasNext() && result.size < capped) {
+                val relative = iterator.next().relativeTo(project).invariantSeparatorsPath
+                if (pathChars + relative.length > MAX_LIST_PATH_CHARS) {
+                    budgetExceeded = true
+                    break
+                }
+                result += relative
+                pathChars += relative.length
+            }
+            result to budgetExceeded
         }
         return buildJsonObject {
             put("root", root.absolutePath)
@@ -206,7 +229,7 @@ object OmniIdeStateBridge {
             put("files", buildJsonArray {
                 paths.forEach { path -> add(JsonPrimitive(path)) }
             })
-            put("truncated", paths.size >= capped)
+            put("truncated", truncatedByBudget || paths.size >= capped)
         }
     }
 
