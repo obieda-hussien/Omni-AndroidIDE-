@@ -319,6 +319,9 @@ class OmniIdeExtensionService : ExtensionService() {
             "java" -> LanguageType.JAVA
             else -> LanguageType.KOTLIN
         }
+        require(templateName != "Compose Activity" || language == LanguageType.KOTLIN) {
+            "Compose Activity requires Kotlin"
+        }
         val minSdk = (payload.int("min_sdk") ?: 24).coerceIn(21, 36)
         val useKts = payload.bool("use_kts") ?: true
         val saveLocation = (payload.string("save_location")
