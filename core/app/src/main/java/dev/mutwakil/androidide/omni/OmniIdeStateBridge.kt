@@ -126,12 +126,6 @@ object OmniIdeStateBridge {
     }
 
     suspend fun readFile(path: String): JsonObject {
-        require(content.length <= MAX_WRITE_CONTENT_CHARS) {
-            "File replacement is too large for safe Binder transport (" +
-                content.length + " chars; max " + MAX_WRITE_CONTENT_CHARS +
-                "). Use targeted edits or split the change into smaller operations."
-        }
-
         val file = resolveProjectPath(path)
         val active = activeDocument()
         val activePath = active?.get("path")?.toString()?.trim('"')
@@ -154,6 +148,12 @@ object OmniIdeStateBridge {
         content: String,
         expectedRevision: String?
     ): JsonObject {
+        require(content.length <= MAX_WRITE_CONTENT_CHARS) {
+            "File replacement is too large for safe Binder transport (" +
+                content.length + " chars; max " + MAX_WRITE_CONTENT_CHARS +
+                "). Use targeted edits or split the change into smaller operations."
+        }
+
         val file = resolveProjectPath(path)
         val active = activeDocument()
         val activePath = active?.get("path")?.toString()?.trim('"')
