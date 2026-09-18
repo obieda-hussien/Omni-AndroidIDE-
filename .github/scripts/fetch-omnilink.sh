@@ -15,7 +15,7 @@ fetch() {
   local target="$DEST_DIR/$ARTIFACT.$ext"
   local tmp="$target.tmp"
   local attempt=1
-  local max_attempts=7
+  local max_attempts=6
 
   if [[ -s "$target" ]]; then
     echo "OmniLinkSDK $VERSION .$ext already available in local CI Maven repo."
@@ -25,7 +25,7 @@ fetch() {
   while (( attempt <= max_attempts )); do
     echo "Fetching OmniLinkSDK $VERSION .$ext (attempt $attempt/$max_attempts)..."
     rm -f "$tmp"
-    if curl       --fail       --location       --silent       --show-error       --connect-timeout 20       --max-time 180       --retry 2       --retry-delay 5       --retry-all-errors       --output "$tmp"       "$BASE_URL.$ext"; then
+    if curl       --fail       --location       --silent       --show-error       --connect-timeout 20       --max-time 75       --retry 1       --retry-delay 3       --retry-all-errors       --output "$tmp"       "$BASE_URL.$ext"; then
       test -s "$tmp"
       mv "$tmp" "$target"
       echo "Fetched $target"
@@ -38,7 +38,8 @@ fetch() {
       return 1
     fi
 
-    sleep_for=$(( attempt * attempt * 8 ))
+    sleep_for=$(( 5 * (1 << (attempt - 1)) ))
+    if (( sleep_for > 60 )); then sleep_for=60; fi
     echo "JitPack unavailable/rate-limited; retrying in ${sleep_for}s..."
     sleep "$sleep_for"
     attempt=$(( attempt + 1 ))
