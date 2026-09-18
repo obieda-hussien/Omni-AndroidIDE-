@@ -28,6 +28,7 @@ import dev.mutwakil.androidide.utils.Environment
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -72,6 +73,7 @@ class OmniIdeExtensionService : ExtensionService() {
     private val listeners = RemoteCallbackList<IOmniEventCallback>()
     private val jobRecords = ConcurrentHashMap<String, IdeJobRecord>()
     private val runningJobs = ConcurrentHashMap<String, Job>()
+    private val activeGradleJobId = AtomicReference<String?>(null)
 
     private val buildOutputListener: (String) -> Unit = { chunk ->
         publish(
@@ -202,8 +204,11 @@ class OmniIdeExtensionService : ExtensionService() {
                 }
                 "ide.cancel_job" -> {
                     val id = payload.requiredString("job_id")
+                    val isActiveGradleJob = activeGradleJobId.get() == id
                     runningJobs.remove(id)?.cancel()
-                    runCatching { buildController.cancelCurrentBuild() }
+                    if (isActiveGradleJob) {
+                        runCatching { buildController.cancelCurrentBuild() }
+                    }
                     jobRecords.computeIfPresent(id) { _, record ->
                         record.copy(
                             state = "CANCELLED",
@@ -243,7 +248,7 @@ class OmniIdeExtensionService : ExtensionService() {
                 tasks.forEach { task -> add(JsonPrimitive(task)) }
             })
             put("project_root", root.absolutePath)
-        }) { id ->
+        }, exclusiveGradle = true) { id ->
             val result = buildController.executeTasks(root, tasks, forceSync)
             val success = result.isSuccessful
             val outputTail = OmniIdeStateBridge.buildOutputSnapshot(100_000)
@@ -265,7 +270,7 @@ class OmniIdeExtensionService : ExtensionService() {
         return startJob("sync", buildJsonObject {
             put("project_root", root.absolutePath)
             put("force", force)
-        }) { id ->
+        }, exclusiveGradle = true) { id ->
             val result = buildController.syncProject(root, force)
             val ok = result is dev.mutwakil.androidide.tooling.api.messages.result.InitializeResult.Success
             finishJob(id, ok, result.toString(), if (ok) null else result.toString())
@@ -345,9 +350,18 @@ class OmniIdeExtensionService : ExtensionService() {
     private fun startJob(
         kind: String,
         input: JsonObject,
+        exclusiveGradle: Boolean = false,
         block: suspend (String) -> Unit
     ): ActionOutcome {
         val id = "ide-" + UUID.randomUUID().toString()
+        if (exclusiveGradle && !activeGradleJobId.compareAndSet(null, id)) {
+            return failure(
+                "gradle_busy",
+                "Another AndroidIDE Gradle/sync job is already active: " +
+                    (activeGradleJobId.get() ?: "unknown")
+            )
+        }
+
         val record = IdeJobRecord(
             id = id,
             kind = kind,
@@ -371,6 +385,9 @@ class OmniIdeExtensionService : ExtensionService() {
                 )
             } finally {
                 runningJobs.remove(id)
+                if (exclusiveGradle) {
+                    activeGradleJobId.compareAndSet(id, null)
+                }
             }
         }
         runningJobs[id] = job
