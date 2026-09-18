@@ -1,17 +1,17 @@
 package dev.mutwakil.androidide.omni
 
-import android.os.Process
 import dev.mutwakil.androidide.git.core.GitAutomation
 import dev.mutwakil.androidide.git.core.GitRepository
 import dev.mutwakil.androidide.utils.Environment
 import dev.mutwakil.androidide.projects.builder.BuildService
 import dev.mutwakil.androidide.lookup.Lookup
+import dev.mutwakil.androidide.logging.provider.IdeGlobalLogBuffer
 import dev.mutwakil.androidide.buildinfo.BuildInfo
 import dev.mutwakil.androidide.app.IDEApplication
 import dev.mutwakil.androidide.git.core.GitRepositoryManager
 import dev.mutwakil.androidide.projects.ProjectManagerImpl
+import dev.mutwakil.androidide.preferences.internal.DevOpsPreferences
 import java.io.File
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -222,26 +222,15 @@ object OmniIdeWorkspaceBridge {
         }
     }
 
-    suspend fun ideLogs(lines: Int, query: String?): JsonObject = withContext(Dispatchers.IO) {
-        val maxLines = lines.coerceIn(1, 2_000)
-        val command = listOf(
-            "logcat",
-            "--pid=${Process.myPid()}",
-            "-d",
-            "-v",
-            "threadtime",
-            "-t",
-            maxLines.toString()
-        )
-        val process = ProcessBuilder(command).redirectErrorStream(true).start()
-        val text = runCatching { process.inputStream.bufferedReader().readText() }.getOrDefault("")
-        val exited = runCatching { process.waitFor(5, TimeUnit.SECONDS) }.getOrDefault(false)
-        if (!exited) process.destroy()
-        val filtered = filterTail(text.takeLast(MAX_LOG_CHARS), maxLines, query)
-        buildJsonObject {
-            put("pid", Process.myPid())
-            put("content", filtered)
+    suspend fun ideLogs(lines: Int, query: String?): JsonObject {
+        val maxLines = lines.coerceIn(1, 1_000)
+        val snapshot = IdeGlobalLogBuffer.snapshot(maxLines, query)
+        val text = snapshot.joinToString("\n").takeLast(MAX_LOG_CHARS)
+        return buildJsonObject {
+            put("content", text)
             put("query", query.orEmpty())
+            put("count", snapshot.size)
+            put("source", "IdeGlobalLogBuffer")
         }
     }
 
@@ -408,6 +397,7 @@ object OmniIdeWorkspaceBridge {
             put("buildInProgress", service?.isBuildInProgress == true)
             put("gitRepository", git)
             put("appLogBufferChars", OmniIdeObservabilityBridge.appLogsSnapshot(MAX_LOG_CHARS).length)
+            put("logSenderEnabled", DevOpsPreferences.logsenderEnabled)
             put("initScriptExists", Environment.INIT_SCRIPT?.isFile == true)
             put("gradlePluginExists", Environment.ANDROIDIDE_GRADLE_PLUGIN_JAR?.isFile == true)
         }
