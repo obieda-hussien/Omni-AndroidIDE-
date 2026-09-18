@@ -52,7 +52,6 @@ import dev.mutwakil.androidide.models.OpenedFile
 import dev.mutwakil.androidide.models.OpenedFilesCache
 import dev.mutwakil.androidide.models.Range
 import dev.mutwakil.androidide.models.SaveResult
-import dev.mutwakil.androidide.omni.OmniChatDialog
 import dev.mutwakil.androidide.omni.OmniIdeStateBridge
 import dev.mutwakil.androidide.preferences.internal.GeneralPreferences
 import dev.mutwakil.androidide.projects.ProjectManagerImpl
@@ -112,6 +111,7 @@ open class EditorHandlerActivity : ProjectHandlerActivity(), IEditorHandler {
     mBuildEventListener.setActivity(this)
     super.onCreate(savedInstanceState)
     OmniIdeStateBridge.attach(this)
+    configureOmniWorkspaceDrawer()
 
     editorViewModel._displayedFile.observe(
       this) { this.content.editorContainer.displayedChild = it }
@@ -268,11 +268,37 @@ open class EditorHandlerActivity : ProjectHandlerActivity(), IEditorHandler {
       setIcon(dev.mutwakil.androidide.R.drawable.ic_omni_agent)
       setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
       setOnMenuItemClickListener {
-        OmniChatDialog.show(this@EditorHandlerActivity)
+        toggleOmniWorkspace()
         true
       }
     }
     return true
+  }
+
+  fun openOmniWorkspace() {
+    binding.editorDrawerLayout.openDrawer(GravityCompat.END)
+  }
+
+  fun closeOmniWorkspace() {
+    binding.editorDrawerLayout.closeDrawer(GravityCompat.END)
+  }
+
+  private fun toggleOmniWorkspace() {
+    if (binding.editorDrawerLayout.isDrawerOpen(GravityCompat.END)) {
+      closeOmniWorkspace()
+    } else {
+      openOmniWorkspace()
+    }
+  }
+
+  private fun configureOmniWorkspaceDrawer() {
+    val density = resources.displayMetrics.density
+    val screenWidth = resources.displayMetrics.widthPixels
+    val maxWidth = (600f * density).toInt()
+    val desired = (screenWidth * 0.94f).toInt()
+    binding.omniNav.layoutParams = binding.omniNav.layoutParams.apply {
+      width = minOf(desired, maxWidth)
+    }
   }
 
   open fun prepareOptionsMenu(menu: Menu) {
