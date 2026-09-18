@@ -124,6 +124,7 @@ class OmniIdeExtensionService : ExtensionService() {
         capability("ide.get_file_info", "Payload: {path}. File metadata, line count, dirty state and SHA-256 revision.", CapabilityExecutionMode.ASYNC),
         capability("ide.read_file", "Payload: {path}. Read a bounded project file snapshot with a SHA-256 revision.", CapabilityExecutionMode.ASYNC),
         capability("ide.read_lines", "Payload: {path,start_line,end_line,include_line_numbers?}. Read an exact 1-based line range without transporting the whole file.", CapabilityExecutionMode.ASYNC),
+        capability("ide.preview_line_patch", "Payload: {path,expected_revision?,hunks:[{start_line,end_line,replacement}]}. Compute a bounded diff-like preview and next revision without writing.", CapabilityExecutionMode.ASYNC),
         capability("ide.write_file", "Payload: {path,content,expected_revision?}. Revision-safe whole-file replacement; prefer line patches for focused edits.", CapabilityExecutionMode.ASYNC, destructive = true),
         capability("ide.apply_line_patch", "Payload: {path,expected_revision?,hunks:[{start_line,end_line,replacement}]}. Hunks use original 1-based line numbers and must not overlap.", CapabilityExecutionMode.ASYNC, destructive = true),
         capability("ide.search_text", "Payload: {query,path?,regex?,case_sensitive?,file_glob?,limit?}. Search project text with bounded path/line/column previews.", CapabilityExecutionMode.ASYNC),
@@ -202,6 +203,25 @@ class OmniIdeExtensionService : ExtensionService() {
                         includeLineNumbers = payload.bool("include_line_numbers") ?: true
                     )
                 )
+                "ide.preview_line_patch" -> {
+                    val hunks = payload["hunks"]?.jsonArray?.map { element ->
+                        val hunk = element.jsonObject
+                        OmniIdeWorkspaceBridge.LineHunk(
+                            startLine = hunk.int("start_line")
+                                ?: throw IllegalArgumentException("Each hunk needs start_line"),
+                            endLine = hunk.int("end_line")
+                                ?: throw IllegalArgumentException("Each hunk needs end_line"),
+                            replacement = hunk.string("replacement").orEmpty()
+                        )
+                    }.orEmpty()
+                    success(
+                        OmniIdeWorkspaceBridge.previewLinePatch(
+                            path = payload.requiredString("path"),
+                            expectedRevision = payload.string("expected_revision"),
+                            hunks = hunks
+                        )
+                    )
+                }
                 "ide.apply_line_patch" -> {
                     val hunks = payload["hunks"]?.jsonArray?.map { element ->
                         val hunk = element.jsonObject
