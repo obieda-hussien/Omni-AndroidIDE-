@@ -2,8 +2,14 @@ package dev.mutwakil.androidide.omni
 
 import android.os.Process
 import dev.mutwakil.androidide.git.core.GitRepository
+import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider
+import dev.mutwakil.androidide.utils.Environment
+import dev.mutwakil.androidide.projects.builder.BuildService
+import dev.mutwakil.androidide.lookup.Lookup
+import dev.mutwakil.androidide.git.core.GitCredentialsManager
+import dev.mutwakil.androidide.buildinfo.BuildInfo
+import dev.mutwakil.androidide.app.IDEApplication
 import dev.mutwakil.androidide.git.core.GitRepositoryManager
-import dev.mutwakil.androidide.models.LogLine
 import dev.mutwakil.androidide.projects.ProjectManagerImpl
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -371,6 +377,113 @@ object OmniIdeWorkspaceBridge {
             buildJsonObject { put("branch", checkedOut) }
         }
 
+    suspend fun gitPull(remote: String): JsonObject = withRepository { repo ->
+        val result = repo.pull(remote.ifBlank { "origin" }, storedCredentialsOrNull())
+        buildJsonObject {
+            put("successful", result.isSuccessful)
+            put("result", result.toString().take(8_000))
+        }
+    }
+
+    suspend fun gitPush(remote: String): JsonObject = withRepository { repo ->
+        val credentials = storedCredentialsOrNull()
+            ?: throw IllegalStateException(
+                "No Git credentials are stored in AndroidIDE. Configure Git credentials first."
+            )
+        val results = repo.push(remote.ifBlank { "origin" }, credentials).toList()
+        buildJsonObject {
+            put("remote", remote.ifBlank { "origin" })
+            put("results", buildJsonArray {
+                results.forEach { result -> add(JsonPrimitive(result.toString().take(8_000))) }
+            })
+            put("count", results.size)
+        }
+    }
+
+    suspend fun gitMerge(branch: String): JsonObject = withRepository { repo ->
+        require(branch.isNotBlank()) { "branch is required" }
+        val result = repo.merge(branch)
+        buildJsonObject {
+            put("branch", branch)
+            put("status", result.mergeStatus?.toString().orEmpty())
+            put("result", result.toString().take(12_000))
+        }
+    }
+
+    suspend fun gitAbortMerge(): JsonObject = withRepository { repo ->
+        repo.abortMerge()
+        buildJsonObject { put("aborted", true) }
+    }
+
+    suspend fun health(): JsonObject {
+        val root = runCatching { OmniIdeStateBridge.projectRoot() }.getOrNull()
+        val service = Lookup.getDefault().lookup(BuildService.KEY_BUILD_SERVICE)
+        val git = if (root != null) GitRepositoryManager.isRepository(root) else false
+        val active = runCatching { OmniIdeStateBridge.activeDocument() }.getOrNull()
+        return buildJsonObject {
+            put("ideVersion", BuildInfo.VERSION_NAME_SIMPLE)
+            put("projectOpen", root != null)
+            root?.let { put("projectRoot", it.absolutePath) }
+            put("activeDocumentOpen", active != null)
+            put("toolingServiceAvailable", service != null)
+            put("toolingServerStarted", service?.isToolingServerStarted() == true)
+            put("buildInProgress", service?.isBuildInProgress == true)
+            put("gitRepository", git)
+            put("appLogBufferChars", OmniIdeObservabilityBridge.appLogsSnapshot(MAX_LOG_CHARS).length)
+            put("initScriptExists", Environment.INIT_SCRIPT?.isFile == true)
+            put("gradlePluginExists", Environment.ANDROIDIDE_GRADLE_PLUGIN_JAR?.isFile == true)
+        }
+    }
+
+    suspend fun activeLspDiagnostics(limit: Int): JsonObject {
+        val max = limit.coerceIn(1, 250)
+        val triple = withContext(Dispatchers.Main.immediate) {
+            val view = OmniIdeStateBridge.activeActivity()?.getCurrentEditor()
+                ?: return@withContext null
+            val editor = view.editor ?: return@withContext null
+            val file = editor.file ?: return@withContext null
+            val server = editor.languageServer ?: return@withContext null
+            Triple(file, server, view.isModified)
+        }
+        if (triple == null) {
+            return buildJsonObject {
+                put("available", false)
+                put("diagnostics", buildJsonArray {})
+            }
+        }
+        val (file, server, dirty) = triple
+        val result = runCatching { server.analyze(file.toPath()) }.getOrElse {
+            return buildJsonObject {
+                put("available", false)
+                put("path", relative(file))
+                put("error", it.message ?: it.javaClass.simpleName)
+                put("diagnostics", buildJsonArray {})
+            }
+        }
+        val items = result.diagnostics.take(max)
+        return buildJsonObject {
+            put("available", true)
+            put("path", relative(file))
+            put("dirty", dirty)
+            put("count", items.size)
+            put("diagnostics", buildJsonArray {
+                items.forEach { item ->
+                    add(buildJsonObject {
+                        put("severity", item.severity.name)
+                        put("message", item.message.take(2_000))
+                        put("code", item.code.take(300))
+                        put("source", item.source.take(300))
+                        put("startLine", item.range.start.line + 1)
+                        put("startColumn", item.range.start.column + 1)
+                        put("endLine", item.range.end.line + 1)
+                        put("endColumn", item.range.end.column + 1)
+                    })
+                }
+            })
+            put("truncated", result.diagnostics.size > max)
+        }
+    }
+
     data class LineHunk(
         val startLine: Int,
         val endLine: Int,
@@ -395,6 +508,14 @@ object OmniIdeWorkspaceBridge {
             require(file.exists() && file.isFile) { "File not found: $path" }
             TextSnapshot(file, file.readText(), false)
         }
+    }
+
+    private fun storedCredentialsOrNull(): UsernamePasswordCredentialsProvider? {
+        val manager = GitCredentialsManager(IDEApplication.instance)
+        val username = manager.getUsername()
+        val token = manager.getToken()
+        if (username.isNullOrBlank() || token.isNullOrBlank()) return null
+        return UsernamePasswordCredentialsProvider(username, token)
     }
 
     private suspend fun <T> withRepository(block: suspend (GitRepository) -> T): T {
