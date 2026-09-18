@@ -120,19 +120,39 @@ class OmniIdeExtensionService : ExtensionService() {
     override val capabilities: List<CapabilityDescriptor> = listOf(
         capability("ide.get_project_context", "Project root, modules, sync issues, active document and build tail.", CapabilityExecutionMode.IMMEDIATE),
         capability("ide.get_active_document", "Current editor file, content, dirty state and revision.", CapabilityExecutionMode.IMMEDIATE),
-        capability("ide.read_file", "Read a project file with a SHA-256 revision.", CapabilityExecutionMode.ASYNC),
-        capability("ide.write_file", "Revision-safe project file replacement. Refuses dirty editor buffers.", CapabilityExecutionMode.ASYNC),
-        capability("ide.list_files", "List project files while skipping build/.gradle/.git trees.", CapabilityExecutionMode.ASYNC),
+        capability("ide.get_file_info", "File metadata, line count, dirty state and SHA-256 revision.", CapabilityExecutionMode.ASYNC),
+        capability("ide.read_file", "Read a bounded project file snapshot with a SHA-256 revision.", CapabilityExecutionMode.ASYNC),
+        capability("ide.read_lines", "Read an exact 1-based line range without transporting the whole file.", CapabilityExecutionMode.ASYNC),
+        capability("ide.write_file", "Revision-safe whole-file replacement. Refuses dirty editor buffers and oversized Binder payloads.", CapabilityExecutionMode.ASYNC, destructive = true),
+        capability("ide.apply_line_patch", "Apply one or more revision-safe line hunks against original 1-based line numbers.", CapabilityExecutionMode.ASYNC, destructive = true),
+        capability("ide.search_text", "Search project text by literal or regex query with optional file glob and bounded results.", CapabilityExecutionMode.ASYNC),
+        capability("ide.list_files", "List project files while skipping generated/cache/VCS trees.", CapabilityExecutionMode.ASYNC),
         capability("ide.open_file", "Open a project file in the AndroidIDE editor.", CapabilityExecutionMode.ASYNC),
         capability("ide.refresh_project", "Reload externally changed clean buffers.", CapabilityExecutionMode.ASYNC),
+
+        capability("ide.get_build_output", "Read/filter the latest AndroidIDE build output by tail line count.", CapabilityExecutionMode.IMMEDIATE),
+        capability("ide.get_ide_logs", "Read/filter recent AndroidIDE process logs.", CapabilityExecutionMode.ASYNC),
+        capability("ide.get_app_logs", "Read/filter recent app-under-test logs captured through AndroidIDE LogSender.", CapabilityExecutionMode.IMMEDIATE),
+        capability("ide.clear_app_logs", "Clear Omni's bounded app-log mirror without affecting AndroidIDE's normal Logs UI.", CapabilityExecutionMode.IMMEDIATE),
+        capability("ide.get_diagnostics", "Return bounded project-sync and latest build diagnostics.", CapabilityExecutionMode.IMMEDIATE),
+
+        capability("ide.git_status", "Read native JGit status, branch, conflicts, staged/unstaged/untracked files and local-ahead count.", CapabilityExecutionMode.ASYNC),
+        capability("ide.git_diff", "Read a bounded JGit diff for one project file.", CapabilityExecutionMode.ASYNC),
+        capability("ide.git_history", "Read recent Git commit history.", CapabilityExecutionMode.ASYNC),
+        capability("ide.git_branches", "List local and remote Git branches.", CapabilityExecutionMode.ASYNC),
+        capability("ide.git_stage", "Stage selected project paths with AndroidIDE JGit.", CapabilityExecutionMode.ASYNC, destructive = true),
+        capability("ide.git_commit", "Create a local Git commit from the current index.", CapabilityExecutionMode.ASYNC, destructive = true),
+        capability("ide.git_checkout", "Checkout or create a local/tracking branch.", CapabilityExecutionMode.ASYNC, destructive = true),
+
         capability("ide.sync_project", "Synchronize project through AndroidIDE's Tooling API.", CapabilityExecutionMode.JOB, streaming = true),
         capability("ide.start_build", "Execute Gradle build tasks through AndroidIDE's Tooling API.", CapabilityExecutionMode.JOB, streaming = true),
         capability("ide.start_tests", "Execute project tests through AndroidIDE's Tooling API.", CapabilityExecutionMode.JOB, streaming = true),
         capability("ide.start_lint", "Execute Android lint through AndroidIDE's Tooling API.", CapabilityExecutionMode.JOB, streaming = true),
         capability("ide.get_job", "Read the state/result of an IDE job.", CapabilityExecutionMode.IMMEDIATE),
-        capability("ide.cancel_job", "Cancel an Omni-started IDE job and the current Gradle build.", CapabilityExecutionMode.ASYNC),
-        capability("ide.create_project", "Create a project with AndroidIDE's own template engine.", CapabilityExecutionMode.JOB, streaming = true),
-        capability("ide.open_project", "Set and open a project in AndroidIDE.", CapabilityExecutionMode.ASYNC)
+        capability("ide.list_jobs", "List recent Omni-started IDE jobs and terminal/running states.", CapabilityExecutionMode.IMMEDIATE),
+        capability("ide.cancel_job", "Cancel an Omni-started IDE job and the current Gradle build.", CapabilityExecutionMode.ASYNC, destructive = true),
+        capability("ide.create_project", "Create a project with AndroidIDE's own template engine.", CapabilityExecutionMode.JOB, streaming = true, destructive = true),
+        capability("ide.open_project", "Set and open a project in AndroidIDE.", CapabilityExecutionMode.ASYNC, destructive = true)
     )
 
     override fun onCreate() {
@@ -159,6 +179,96 @@ class OmniIdeExtensionService : ExtensionService() {
                     OmniIdeStateBridge.activeDocument() ?: buildJsonObject {
                         put("open", false)
                     }
+                )
+                "ide.get_file_info" -> success(
+                    OmniIdeWorkspaceBridge.fileInfo(payload.requiredString("path"))
+                )
+                "ide.read_lines" -> success(
+                    OmniIdeWorkspaceBridge.readLines(
+                        path = payload.requiredString("path"),
+                        startLine = payload.int("start_line") ?: 1,
+                        endLine = payload.int("end_line") ?: (payload.int("start_line") ?: 1),
+                        includeLineNumbers = payload.bool("include_line_numbers") ?: true
+                    )
+                )
+                "ide.apply_line_patch" -> {
+                    val hunks = payload["hunks"]?.jsonArray?.map { element ->
+                        val hunk = element.jsonObject
+                        OmniIdeWorkspaceBridge.LineHunk(
+                            startLine = hunk.int("start_line")
+                                ?: throw IllegalArgumentException("Each hunk needs start_line"),
+                            endLine = hunk.int("end_line")
+                                ?: throw IllegalArgumentException("Each hunk needs end_line"),
+                            replacement = hunk.string("replacement").orEmpty()
+                        )
+                    }.orEmpty()
+                    success(
+                        OmniIdeWorkspaceBridge.applyLinePatch(
+                            path = payload.requiredString("path"),
+                            expectedRevision = payload.string("expected_revision"),
+                            hunks = hunks
+                        )
+                    )
+                }
+                "ide.search_text" -> success(
+                    OmniIdeWorkspaceBridge.searchText(
+                        query = payload.requiredString("query"),
+                        relativeDir = payload.string("path").orEmpty(),
+                        regex = payload.bool("regex") ?: false,
+                        caseSensitive = payload.bool("case_sensitive") ?: false,
+                        fileGlob = payload.string("file_glob"),
+                        maxResults = payload.int("limit") ?: 100
+                    )
+                )
+                "ide.get_build_output" -> success(
+                    OmniIdeWorkspaceBridge.buildOutput(
+                        lines = payload.int("lines") ?: 250,
+                        query = payload.string("query")
+                    )
+                )
+                "ide.get_ide_logs" -> success(
+                    OmniIdeWorkspaceBridge.ideLogs(
+                        lines = payload.int("lines") ?: 250,
+                        query = payload.string("query")
+                    )
+                )
+                "ide.get_app_logs" -> success(
+                    OmniIdeWorkspaceBridge.appLogs(
+                        lines = payload.int("lines") ?: 250,
+                        query = payload.string("query")
+                    )
+                )
+                "ide.clear_app_logs" -> {
+                    OmniIdeObservabilityBridge.clearAppLogs()
+                    success(buildJsonObject { put("cleared", true) })
+                }
+                "ide.get_diagnostics" -> success(
+                    OmniIdeWorkspaceBridge.diagnostics(payload.int("limit") ?: 120)
+                )
+                "ide.git_status" -> success(OmniIdeWorkspaceBridge.gitStatus())
+                "ide.git_diff" -> success(
+                    OmniIdeWorkspaceBridge.gitDiff(payload.requiredString("path"))
+                )
+                "ide.git_history" -> success(
+                    OmniIdeWorkspaceBridge.gitHistory(payload.int("limit") ?: 30)
+                )
+                "ide.git_branches" -> success(OmniIdeWorkspaceBridge.gitBranches())
+                "ide.git_stage" -> success(
+                    OmniIdeWorkspaceBridge.gitStage(payload.stringList("paths"))
+                )
+                "ide.git_commit" -> success(
+                    OmniIdeWorkspaceBridge.gitCommit(
+                        message = payload.requiredString("message"),
+                        authorName = payload.string("author_name"),
+                        authorEmail = payload.string("author_email")
+                    )
+                )
+                "ide.git_checkout" -> success(
+                    OmniIdeWorkspaceBridge.gitCheckout(
+                        branch = payload.requiredString("branch"),
+                        createNew = payload.bool("create_new") ?: false,
+                        startPoint = payload.string("start_point")
+                    )
                 )
                 "ide.read_file" -> success(
                     OmniIdeStateBridge.readFile(payload.requiredString("path"))
@@ -205,6 +315,16 @@ class OmniIdeExtensionService : ExtensionService() {
                     val record = jobRecords[id]
                         ?: return failure("job_not_found", "Unknown IDE job: $id")
                     success(record.toJson())
+                }
+                "ide.list_jobs" -> {
+                    val limit = (payload.int("limit") ?: 40).coerceIn(1, 100)
+                    val recent = jobRecords.values
+                        .sortedByDescending { it.startedAt }
+                        .take(limit)
+                    success(buildJsonObject {
+                        put("jobs", buildJsonArray { recent.forEach { add(it.toJson()) } })
+                        put("count", recent.size)
+                    })
                 }
                 "ide.cancel_job" -> {
                     val id = payload.requiredString("job_id")
@@ -495,10 +615,14 @@ class OmniIdeExtensionService : ExtensionService() {
         name: String,
         description: String,
         mode: CapabilityExecutionMode,
-        streaming: Boolean = false
+        streaming: Boolean = false,
+        destructive: Boolean = false,
+        requiresConfirmation: Boolean = destructive
     ) = CapabilityDescriptor(
         name = name,
         description = description,
+        destructive = destructive,
+        requiresConfirmation = requiresConfirmation,
         executionMode = mode,
         supportsStreaming = streaming
     )
