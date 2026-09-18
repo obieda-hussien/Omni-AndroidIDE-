@@ -43,6 +43,7 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -242,14 +243,17 @@ class OmniIdeExtensionService : ExtensionService() {
             put("project_root", root.absolutePath)
         }) { id ->
             val result = buildController.executeTasks(root, tasks, forceSync)
-            val success = runCatching {
-                dev.mutwakil.androidide.tooling.api.messages.result.isSuccessful(result)
-            }.getOrDefault(false)
+            val success = result.isSuccessful
+            val outputTail = OmniIdeStateBridge.buildOutputSnapshot(100_000)
+            val details = buildJsonObject {
+                put("task_result", result.toString())
+                put("build_output_tail", outputTail)
+            }.toString()
             finishJob(
                 id = id,
                 success = success,
-                result = result.toString(),
-                error = if (success) null else result.toString()
+                result = details,
+                error = if (success) null else outputTail.ifBlank { result.toString() }
             )
         }
     }
@@ -455,17 +459,13 @@ class OmniIdeExtensionService : ExtensionService() {
     private fun JsonObject.bool(name: String): Boolean? =
         get(name)?.jsonPrimitive?.booleanOrNull
 
-    private fun JsonObject.stringList(name: String): List<String> {
-        val element = get(name) ?: return emptyList()
-        return runCatching {
-            element.toString()
-                .removePrefix("[")
-                .removeSuffix("]")
-                .split(",")
-                .map { it.trim().trim('"') }
-                .filter { it.isNotBlank() }
+    private fun JsonObject.stringList(name: String): List<String> =
+        runCatching {
+            get(name)?.jsonArray
+                ?.mapNotNull { it.jsonPrimitive.contentOrNull }
+                ?.filter { it.isNotBlank() }
+                .orEmpty()
         }.getOrDefault(emptyList())
-    }
 
     private data class IdeJobRecord(
         val id: String,
