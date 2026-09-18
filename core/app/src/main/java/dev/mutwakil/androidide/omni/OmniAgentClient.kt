@@ -19,6 +19,9 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 
 /**
@@ -40,6 +43,7 @@ class OmniAgentClient(private val context: Context) {
     private var remote: IAgentGatewayService? = null
     @Volatile
     private var connection: ServiceConnection? = null
+    private val connectMutex = Mutex()
 
     suspend fun gatewayManifest(): String {
         val service = connect()
@@ -120,58 +124,84 @@ class OmniAgentClient(private val context: Context) {
         remote = null
     }
 
-    private suspend fun connect(): IAgentGatewayService {
-        remote?.let { return it }
+    private suspend fun connect(): IAgentGatewayService = withTimeout(10_000) {
+        connectMutex.withLock {
+            remote?.let { return@withLock it }
 
-        val component = discoverGateway()
-            ?: throw IllegalStateException(
-                "Omni Dev Workspace is not installed, not signed with the shared Omni key, " +
-                    "or its Agent Gateway is unavailable."
-            )
+            // A disconnected binding remains registered with Android. Explicit reconnect attempts
+            // should replace that stale binding rather than stacking another ServiceConnection.
+            connection?.let { stale ->
+                runCatching { appContext.unbindService(stale) }
+                connection = null
+            }
 
-        return suspendCancellableCoroutine { continuation ->
-            val conn = object : ServiceConnection {
-                override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
-                    val service = IAgentGatewayService.Stub.asInterface(binder)
-                    if (service == null) {
+            val component = discoverGateway()
+                ?: throw IllegalStateException(
+                    "Omni Dev Workspace is not installed, not signed with the shared Omni key, " +
+                        "or its Agent Gateway is unavailable."
+                )
+
+            suspendCancellableCoroutine { continuation ->
+                val conn = object : ServiceConnection {
+                    override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+                        val service = IAgentGatewayService.Stub.asInterface(binder)
+                        if (service == null) {
+                            runCatching { appContext.unbindService(this) }
+                            if (continuation.isActive) {
+                                continuation.resumeWithException(
+                                    IllegalStateException("Omni Agent Gateway returned a null binder")
+                                )
+                            }
+                            return
+                        }
+                        remote = service
+                        connection = this
+                        if (continuation.isActive) continuation.resume(service)
+                    }
+
+                    override fun onServiceDisconnected(name: ComponentName?) {
+                        remote = null
+                    }
+
+                    override fun onBindingDied(name: ComponentName?) {
+                        remote = null
+                        connection = null
                         if (continuation.isActive) {
                             continuation.resumeWithException(
-                                IllegalStateException("Omni Agent Gateway returned a null binder")
+                                IllegalStateException("Omni Agent Gateway binding died")
                             )
                         }
-                        return
                     }
-                    remote = service
-                    connection = this
-                    if (continuation.isActive) continuation.resume(service)
+
+                    override fun onNullBinding(name: ComponentName?) {
+                        remote = null
+                        connection = null
+                        runCatching { appContext.unbindService(this) }
+                        if (continuation.isActive) {
+                            continuation.resumeWithException(
+                                IllegalStateException("Omni Agent Gateway returned a null binding")
+                            )
+                        }
+                    }
                 }
 
-                override fun onServiceDisconnected(name: ComponentName?) {
-                    remote = null
+                val intent = Intent(OmniLinkConstants.ACTION_AGENT_GATEWAY_BIND).apply {
+                    this.component = component
+                    setPackage(component.packageName)
+                }
+                val bound = runCatching {
+                    appContext.bindService(intent, conn, Context.BIND_AUTO_CREATE)
+                }.getOrDefault(false)
+
+                if (!bound && continuation.isActive) {
+                    continuation.resumeWithException(
+                        IllegalStateException("Android refused the Omni Agent Gateway binding")
+                    )
                 }
 
-                override fun onBindingDied(name: ComponentName?) {
-                    remote = null
-                    connection = null
+                continuation.invokeOnCancellation {
+                    if (remote == null) runCatching { appContext.unbindService(conn) }
                 }
-            }
-
-            val intent = Intent(OmniLinkConstants.ACTION_AGENT_GATEWAY_BIND).apply {
-                this.component = component
-                setPackage(component.packageName)
-            }
-            val bound = runCatching {
-                appContext.bindService(intent, conn, Context.BIND_AUTO_CREATE)
-            }.getOrDefault(false)
-
-            if (!bound && continuation.isActive) {
-                continuation.resumeWithException(
-                    IllegalStateException("Android refused the Omni Agent Gateway binding")
-                )
-            }
-
-            continuation.invokeOnCancellation {
-                if (remote == null) runCatching { appContext.unbindService(conn) }
             }
         }
     }
