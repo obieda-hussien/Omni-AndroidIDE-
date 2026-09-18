@@ -31,6 +31,30 @@ plugins {
     id("dev.mutwakil.androidide.desugaring")
 }
 
+val omniLocalProperties = java.util.Properties().apply {
+    val local = rootProject.file("local.properties")
+    if (local.isFile) local.inputStream().use(::load)
+}
+
+fun omniSigningValue(name: String): String? =
+    providers.gradleProperty(name).orNull
+        ?: providers.environmentVariable(name).orNull
+        ?: omniLocalProperties.getProperty(name)
+
+val omniSharedDebugSigning = listOf(
+    "OMNI_SHARED_DEBUG_STORE_FILE",
+    "OMNI_SHARED_DEBUG_STORE_PASSWORD",
+    "OMNI_SHARED_DEBUG_KEY_ALIAS",
+    "OMNI_SHARED_DEBUG_KEY_PASSWORD"
+).map(::omniSigningValue)
+
+val omniSharedReleaseSigning = listOf(
+    "OMNI_SHARED_RELEASE_STORE_FILE",
+    "OMNI_SHARED_RELEASE_STORE_PASSWORD",
+    "OMNI_SHARED_RELEASE_KEY_ALIAS",
+    "OMNI_SHARED_RELEASE_KEY_PASSWORD"
+).map(::omniSigningValue)
+
 apply {
     plugin(AndroidIDEAssetsPlugin::class.java)
 }
@@ -59,12 +83,35 @@ android {
        dataBinding = true
     }
 
+    signingConfigs {
+        if (omniSharedDebugSigning.all { !it.isNullOrBlank() }) {
+            create("omniSharedDebug") {
+                storeFile = rootProject.file(omniSharedDebugSigning[0]!!)
+                storePassword = omniSharedDebugSigning[1]
+                keyAlias = omniSharedDebugSigning[2]
+                keyPassword = omniSharedDebugSigning[3]
+            }
+        }
+        if (omniSharedReleaseSigning.all { !it.isNullOrBlank() }) {
+            create("omniSharedRelease") {
+                storeFile = rootProject.file(omniSharedReleaseSigning[0]!!)
+                storePassword = omniSharedReleaseSigning[1]
+                keyAlias = omniSharedReleaseSigning[2]
+                keyPassword = omniSharedReleaseSigning[3]
+            }
+        }
+    }
+
     buildTypes {
         release {
+            signingConfigs.findByName("omniSharedRelease")
+                ?.let { signingConfig = it }
             isShrinkResources = true
             manifestPlaceholders["sentryDsn"] = ""
         }
         debug {
+            signingConfigs.findByName("omniSharedDebug")
+                ?.let { signingConfig = it }
             manifestPlaceholders["sentryDsn"] = ""
         }
     }
