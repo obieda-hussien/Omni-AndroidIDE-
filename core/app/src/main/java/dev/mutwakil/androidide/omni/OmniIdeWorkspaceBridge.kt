@@ -1,12 +1,11 @@
 package dev.mutwakil.androidide.omni
 
 import android.os.Process
+import dev.mutwakil.androidide.git.core.GitAutomation
 import dev.mutwakil.androidide.git.core.GitRepository
-import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider
 import dev.mutwakil.androidide.utils.Environment
 import dev.mutwakil.androidide.projects.builder.BuildService
 import dev.mutwakil.androidide.lookup.Lookup
-import dev.mutwakil.androidide.git.core.GitCredentialsManager
 import dev.mutwakil.androidide.buildinfo.BuildInfo
 import dev.mutwakil.androidide.app.IDEApplication
 import dev.mutwakil.androidide.git.core.GitRepositoryManager
@@ -379,41 +378,19 @@ object OmniIdeWorkspaceBridge {
         }
 
     suspend fun gitPull(remote: String): JsonObject = withRepository { repo ->
-        val result = repo.pull(remote.ifBlank { "origin" }, storedCredentialsOrNull())
-        buildJsonObject {
-            put("successful", result.isSuccessful)
-            put("result", result.toString().take(8_000))
-        }
+        GitAutomation.pull(repo, IDEApplication.instance, remote).toJson()
     }
 
     suspend fun gitPush(remote: String): JsonObject = withRepository { repo ->
-        val credentials = storedCredentialsOrNull()
-            ?: throw IllegalStateException(
-                "No Git credentials are stored in AndroidIDE. Configure Git credentials first."
-            )
-        val results = repo.push(remote.ifBlank { "origin" }, credentials).toList()
-        buildJsonObject {
-            put("remote", remote.ifBlank { "origin" })
-            put("results", buildJsonArray {
-                results.forEach { result -> add(JsonPrimitive(result.toString().take(8_000))) }
-            })
-            put("count", results.size)
-        }
+        GitAutomation.push(repo, IDEApplication.instance, remote).toJson()
     }
 
     suspend fun gitMerge(branch: String): JsonObject = withRepository { repo ->
-        require(branch.isNotBlank()) { "branch is required" }
-        val result = repo.merge(branch)
-        buildJsonObject {
-            put("branch", branch)
-            put("status", result.mergeStatus?.toString().orEmpty())
-            put("result", result.toString().take(12_000))
-        }
+        GitAutomation.merge(repo, branch).toJson()
     }
 
     suspend fun gitAbortMerge(): JsonObject = withRepository { repo ->
-        repo.abortMerge()
-        buildJsonObject { put("aborted", true) }
+        GitAutomation.abortMerge(repo).toJson()
     }
 
     suspend fun health(): JsonObject {
@@ -511,12 +488,12 @@ object OmniIdeWorkspaceBridge {
         }
     }
 
-    private fun storedCredentialsOrNull(): UsernamePasswordCredentialsProvider? {
-        val manager = GitCredentialsManager(IDEApplication.instance)
-        val username = manager.getUsername()
-        val token = manager.getToken()
-        if (username.isNullOrBlank() || token.isNullOrBlank()) return null
-        return UsernamePasswordCredentialsProvider(username, token)
+    private fun GitAutomation.OperationResult.toJson(): JsonObject = buildJsonObject {
+        put("success", success)
+        put("status", status)
+        put("details", buildJsonArray {
+            details.forEach { detail -> add(JsonPrimitive(detail.take(12_000))) }
+        })
     }
 
     private suspend fun <T> withRepository(block: suspend (GitRepository) -> T): T {
