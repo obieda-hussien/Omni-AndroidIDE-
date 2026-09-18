@@ -385,7 +385,7 @@ class OmniIdeExtensionService : ExtensionService() {
                     error = error.message ?: error.javaClass.simpleName
                 )
             } finally {
-                runningJobs.remove(id, job)
+                runningJobs.remove(id)
                 if (exclusiveGradle) {
                     activeGradleJobId.compareAndSet(id, null)
                 }
