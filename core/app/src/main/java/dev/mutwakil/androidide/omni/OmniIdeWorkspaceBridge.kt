@@ -229,8 +229,8 @@ object OmniIdeWorkspaceBridge {
         )
         val process = ProcessBuilder(command).redirectErrorStream(true).start()
         val text = runCatching { process.inputStream.bufferedReader().readText() }.getOrDefault("")
-        process.waitFor(5, TimeUnit.SECONDS)
-        if (process.isAlive) process.destroy()
+        val exited = runCatching { process.waitFor(5, TimeUnit.SECONDS) }.getOrDefault(false)
+        if (!exited) process.destroy()
         val filtered = filterTail(text.takeLast(MAX_LOG_CHARS), maxLines, query)
         buildJsonObject {
             put("pid", Process.myPid())
@@ -261,8 +261,8 @@ object OmniIdeWorkspaceBridge {
                     lower.contains("exception") ||
                     lower.contains("failed")
             }
-            .takeLast(max)
             .toList()
+            .takeLast(max)
 
         val syncIssues = ProjectManagerImpl.getInstance().projectSyncIssues
             .take(max)
