@@ -28,10 +28,12 @@ import com.vanniktech.maven.publish.MavenPublishBaseExtension
 import org.gradle.api.GradleException
 import org.gradle.api.Project
 import org.gradle.api.publish.PublishingExtension
+import org.gradle.api.publish.maven.tasks.PublishToMavenRepository
 import org.gradle.api.tasks.Delete
 import org.gradle.api.tasks.testing.Test
 import org.gradle.kotlin.dsl.configure
 import org.gradle.kotlin.dsl.create
+import org.gradle.kotlin.dsl.register
 import org.gradle.kotlin.dsl.withType
 import java.io.File
 
@@ -136,8 +138,16 @@ private fun Project.configureMavenLocal() {
     }
   }
 
-  tasks.create<Delete>("deleteBuildMavenLocal") {
+  // Clean once BEFORE the individual publication tasks. Depending on this task from
+  // publishAllPublicationsToBuildMavenLocalRepository deletes the newly published artifacts:
+  // that aggregate runs AFTER the individual PublishToMavenRepository tasks.
+  val deleteBuildMavenLocal = tasks.register<Delete>("deleteBuildMavenLocal") {
     delete(mavenLocalPath)
+  }
+  tasks.withType<PublishToMavenRepository>().configureEach {
+    if (name.endsWith("ToBuildMavenLocalRepository")) {
+      dependsOn(deleteBuildMavenLocal)
+    }
   }
 
   if (project.path in projectsRequiringMavenLocalForTests) {
@@ -150,11 +160,6 @@ private fun Project.configureMavenLocal() {
     }
   }
 
-  afterEvaluate {
-    tasks.getByName("publishAllPublicationsToBuildMavenLocalRepository") {
-      dependsOn(tasks.getByName("deleteBuildMavenLocal"))
-    }
-  }
 }
 
 private fun Project.hasInMemorySigningCredentials(): Boolean {
