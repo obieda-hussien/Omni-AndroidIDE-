@@ -40,6 +40,7 @@ import java.util.Arrays;
 import java.util.Properties;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.zip.ZipFile;
 
 import kotlin.io.ConstantsKt;
 import kotlin.io.FilesKt;
@@ -157,7 +158,26 @@ public class ToolsManager {
       return;
     }
 
-    LOGSENDER_AAR_READY.set(target.isFile() && target.canRead());
+    if (!isValidLogSenderAar(target)) {
+      FileUtils.delete(target);
+      LOG.warn("Bundled LogSender AAR failed integrity validation; project builds will continue without it");
+      return;
+    }
+
+    LOGSENDER_AAR_READY.set(true);
+  }
+
+  private static boolean isValidLogSenderAar(@NonNull File aar) {
+    if (!aar.isFile() || !aar.canRead() || aar.length() <= 0L) {
+      return false;
+    }
+
+    try (ZipFile zip = new ZipFile(aar)) {
+      return zip.getEntry("AndroidManifest.xml") != null && zip.getEntry("classes.jar") != null;
+    } catch (IOException error) {
+      LOG.warn("Failed validating bundled LogSender AAR", error);
+      return false;
+    }
   }
 
   public static boolean isBundledLogSenderReady() {
