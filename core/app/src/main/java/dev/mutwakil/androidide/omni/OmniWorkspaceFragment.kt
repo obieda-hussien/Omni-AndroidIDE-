@@ -786,19 +786,179 @@ class OmniWorkspaceFragment : Fragment() {
         val store = conversations ?: return
         conversationId = id
         store.select(projectRoot, id)
+
+        // Fast offline/local cache first.
         localTranscript = store.transcript(id)
         localConsole = store.console(id)
         clearMessages()
         renderTranscript(localTranscript)
         if (localConsole.isNotBlank()) {
-            val card = createConsoleCard(localConsole, true)
-            messagesColumn.addView(card)
+            messagesColumn.addView(createConsoleCard(localConsole, true))
         }
         emptyState.visibility =
             if (messagesColumn.childCount == 0) View.VISIBLE else View.GONE
         showStatus(store.title(id))
-        refreshHistory()
         scrollMessagesToBottom()
+
+        // Workspace is authoritative. Replace the cache when the remote snapshot arrives.
+        lifecycleScope.launch {
+            runCatching { syncConversationFromWorkspace(id) }
+                .onFailure {
+                    if (conversationId == id) {
+                        showStatus(
+                            "Offline cache • Workspace history unavailable: " +
+                                (it.message ?: it.javaClass.simpleName)
+                        )
+                    }
+                }
+            if (conversationId == id) resumeTaskIfNeeded(id)
+            refreshHistory()
+        }
+    }
+
+    private suspend fun syncConversationFromWorkspace(id: String) {
+        val activeClient = client ?: return
+        val store = conversations ?: return
+        val snapshot = activeClient.getConversation(
+            conversationId = id,
+            query = AgentConversationReadQuery(limit = 100)
+        )
+        if (conversationId != id || !isAdded) return
+        renderCanonicalSnapshot(snapshot)
+        store.setTitle(projectRoot, id, snapshot.conversation.title)
+    }
+
+    private fun renderCanonicalSnapshot(snapshot: AgentConversationSnapshot) {
+        if (conversationId != snapshot.conversation.clientConversationId) return
+        val store = conversations ?: return
+
+        clearMessages()
+        localTranscript = ""
+        localConsole = ""
+
+        snapshot.messages.forEach { message ->
+            when (message.role.uppercase()) {
+                "USER" -> {
+                    addUserBubble(message.content)
+                    localTranscript += "\n\nYou: " + message.content
+                }
+                "ASSISTANT" -> {
+                    message.consoleJson?.takeIf { it.isNotBlank() }?.let { raw ->
+                        val pretty = formatPersistedConsole(raw)
+                        if (pretty.isNotBlank()) {
+                            messagesColumn.addView(createConsoleCard(pretty, true))
+                            localConsole = (localConsole + pretty + "\n").takeLast(80_000)
+                        }
+                    }
+                    activeAssistantView = addAssistantBubble(message.content)
+                    streamedAssistant = StringBuilder(message.content)
+                    localTranscript += "\n\nOmni: " + message.content
+                }
+                else -> {
+                    addAssistantBubble("[" + message.role + "]\n" + message.content)
+                }
+            }
+        }
+
+        store.saveTranscript(projectRoot, conversationId, localTranscript)
+        store.saveConsole(projectRoot, conversationId, localConsole)
+        emptyState.visibility =
+            if (messagesColumn.childCount == 0) View.VISIBLE else View.GONE
+
+        val statusSuffix = snapshot.conversation.status
+            ?.takeIf { it.isNotBlank() }
+            ?.let { " • " + it }
+            .orEmpty()
+        showStatus(snapshot.conversation.title + statusSuffix + " • synced from Workspace")
+        scrollMessagesToBottom()
+    }
+
+    private fun formatPersistedConsole(raw: String): String {
+        if (raw.isBlank()) return ""
+        return runCatching {
+            val array = JSONArray(raw)
+            buildString {
+                for (index in 0 until array.length()) {
+                    val item = array.optJSONObject(index) ?: continue
+                    val type = item.optString("type")
+                    val line = when (type) {
+                        "thinking" ->
+                            "[THINK] Reasoning iteration " + item.optInt("iteration")
+                        "deep_thinking" ->
+                            "[DEEP] " + item.optString("snippet")
+                        "tool" ->
+                            "[TOOL] " + item.optString("toolName") + ": " +
+                                item.optString("params")
+                        "result" -> {
+                            val marker = if (item.optBoolean("isError")) "ERROR" else "RESULT"
+                            val duration = item.optLong("durationMs", 0L)
+                            "[" + marker + "] " + item.optString("toolName") + ": " +
+                                item.optString("snippet") +
+                                if (duration > 0L) " [" + duration + "ms]" else ""
+                        }
+                        "token" -> {
+                            val budget = if (item.has("budget")) "/" + item.optInt("budget") else ""
+                            "[TOK] " + item.optInt("totalTokens") + budget
+                        }
+                        "phase" ->
+                            "[PHASE] " + item.optString("phase") +
+                                item.optString("detail").takeIf { it.isNotBlank() }
+                                    ?.let { " • " + it }.orEmpty()
+                        "context_summary" ->
+                            "[CONTEXT] " + item.optString("summary")
+                        "error" ->
+                            "[ERROR] " + item.optString("message")
+                        "reply" -> "[REPLY] Final response"
+                        else -> null
+                    }
+                    if (!line.isNullOrBlank()) appendLine(line)
+                }
+            }.trimEnd()
+        }.getOrElse {
+            "[CONSOLE] " + raw.take(4_000)
+        }
+    }
+
+    private suspend fun resumeTaskIfNeeded(id: String) {
+        val store = conversations ?: return
+        val activeClient = client ?: return
+        val cursor = store.runCursor(id) ?: return
+
+        val snapshot = runCatching { activeClient.taskSnapshot(cursor.taskId) }
+            .getOrElse {
+                store.clearRunCursor(id)
+                return
+            }
+
+        if (
+            snapshot.state == AgentTaskState.COMPLETED ||
+            snapshot.state == AgentTaskState.FAILED ||
+            snapshot.state == AgentTaskState.CANCELLED
+        ) {
+            store.clearRunCursor(id)
+            runCatching { syncConversationFromWorkspace(id) }
+            return
+        }
+
+        if (conversationId != id) return
+        currentTaskId = cursor.taskId
+        store.saveRunCursor(id, cursor.taskId, snapshot.lastSequence)
+        updateSendState(true)
+        beginLiveConsole()
+        showStatus("Live • reconnecting to running Workspace task…")
+
+        runningJob = lifecycleScope.launch {
+            val terminal = recoverExistingTask(cursor.taskId, store)
+            if (terminal) {
+                store.clearRunCursor(id)
+                runCatching { syncConversationFromWorkspace(id) }
+            }
+            if (conversationId == id) {
+                currentTaskId = null
+                updateSendState(false)
+                refreshHistory()
+            }
+        }
     }
 
     private fun clearMessages() {
