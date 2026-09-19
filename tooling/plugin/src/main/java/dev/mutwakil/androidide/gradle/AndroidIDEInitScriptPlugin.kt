@@ -17,7 +17,6 @@
 
 package dev.mutwakil.androidide.gradle
 
-import dev.mutwakil.androidide.buildinfo.BuildInfo
 import dev.mutwakil.androidide.tooling.api.LogSenderConfig._PROPERTY_IS_TEST_ENV
 import dev.mutwakil.androidide.tooling.api.LogSenderConfig._PROPERTY_MAVEN_LOCAL_REPOSITORY
 import org.gradle.StartParameter
@@ -136,17 +135,11 @@ class AndroidIDEInitScriptPlugin : Plugin<Gradle> {
       }
     }
 
-    // Resolve normal Android/project dependencies from their canonical repositories first.
-    // The AndroidIDE plugin itself is loaded directly from the init-script classloader, so user
-    // builds no longer need the AndroidIDE snapshots repository injected ahead of every lookup.
+    // Resolve normal Android/project dependencies only from their canonical repositories.
+    // AndroidIDE's own injected plugin and LogSender runtime are shipped locally with the APK, so
+    // normal user builds do not need AndroidIDE-specific snapshot/public repository probes.
     google()
     mavenCentral()
     gradlePluginPortal()
-
-    // Keep AndroidIDE's public repository as a final fallback for released IDE artifacts such as
-    // LogSender, without penalizing every ordinary dependency lookup.
-    maven { repository ->
-      repository.setUrl(BuildInfo.PUBLIC_REPOSITORY)
-    }
   }
 }
