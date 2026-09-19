@@ -21,6 +21,10 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.omnilink.sdk.AgentClientMode
+import com.omnilink.sdk.AgentTaskState
+import com.omnilink.sdk.AgentConversationSnapshot
+import com.omnilink.sdk.AgentConversationReadQuery
+import com.omnilink.sdk.AgentConversationQuery
 import com.omnilink.sdk.AgentTaskEvent
 import com.omnilink.sdk.AgentTaskRequest
 import dev.mutwakil.androidide.R
@@ -30,10 +34,13 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.buildJsonObject
+import org.json.JSONArray
 
 /**
  * OmniDev-styled workspace embedded directly inside AndroidIDE.
@@ -69,6 +76,7 @@ class OmniWorkspaceFragment : Fragment() {
     private var client: OmniAgentClient? = null
     private var conversations: OmniConversationStore? = null
     private var runningJob: Job? = null
+    private var historyRefreshJob: Job? = null
     private var currentTaskId: String? = null
     private var conversationId: String = ""
     private var projectRoot: String = ""
