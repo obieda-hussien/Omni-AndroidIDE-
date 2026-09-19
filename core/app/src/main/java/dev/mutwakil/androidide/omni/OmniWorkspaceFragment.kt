@@ -224,6 +224,8 @@ class OmniWorkspaceFragment : Fragment() {
     override fun onDestroyView() {
         runningJob?.cancel()
         runningJob = null
+        historyRefreshJob?.cancel()
+        historyRefreshJob = null
         client?.disconnect()
         client = null
         super.onDestroyView()
@@ -740,10 +742,18 @@ class OmniWorkspaceFragment : Fragment() {
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                showStatus(
-                    "Reconnecting to Workspace… " +
-                        (error.message ?: error.javaClass.simpleName)
-                )
+                val message = error.message ?: error.javaClass.simpleName
+                val terminalLookupFailure =
+                    message.contains("Unknown task id", ignoreCase = true) ||
+                        message.contains("task_not_found", ignoreCase = true) ||
+                        message.contains("different connected application", ignoreCase = true)
+                if (terminalLookupFailure) {
+                    store.clearRunCursor(conversationId)
+                    showStatus("Live run is no longer replayable • restoring saved Workspace history…")
+                    runCatching { syncConversationFromWorkspace(conversationId) }
+                    return true
+                }
+                showStatus("Reconnecting to Workspace… " + message)
                 delay(1_500L)
             }
         }
@@ -1181,9 +1191,10 @@ class OmniWorkspaceFragment : Fragment() {
             }
 
             // An empty unsent local chat has no Workspace row yet. Keep only that temporary row.
+            val remoteIds = remoteItems.asSequence().map { it.id }.toHashSet()
             val pendingLocal = store.list(projectRoot).firstOrNull { item ->
                 item.id == conversationId &&
-                    item.id !in remoteItems.map { it.id }.toSet() &&
+                    item.id !in remoteIds &&
                     store.transcript(item.id).isBlank()
             }
             val merged = if (pendingLocal != null) listOf(pendingLocal) + remoteItems else remoteItems
