@@ -41,14 +41,14 @@ env:
 
   # Build configuration
   BUILD_JAVA_VERSION: '21'
-  BUILD_JAVA_DIST: 'adopt'
+  BUILD_JAVA_DIST: 'temurin'
   BUILD_IS_RELEASE: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') }}
   ReleaseAndroidIDE: ${{ github.ref == 'refs/heads/main' }}
 
 jobs:
   prepare_omnilink:
     name: Prepare OmniLinkSDK
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -74,7 +74,7 @@ jobs:
         build_type: ['debug', 'release']
     name: Build APK
     needs: prepare_omnilink
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -159,7 +159,7 @@ jobs:
 
   run_tooling_api_tests:
     name: Build and test Tooling API
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -201,7 +201,7 @@ jobs:
 
   publish:
     name: Publish release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [ build_apk, run_tooling_api_tests ]
     if: |
       always()
@@ -284,7 +284,7 @@ jobs:
 
   publish_snapshots:
     name: Publish package snapshots
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [ build_apk ]
     if: ${{ always() && github.ref != 'refs/heads/main' && github.event_name != 'pull_request' && needs.build_apk.result == 'success' }}
     steps:
