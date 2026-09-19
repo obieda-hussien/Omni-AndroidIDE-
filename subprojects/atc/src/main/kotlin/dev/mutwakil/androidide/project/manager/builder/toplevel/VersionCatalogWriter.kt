@@ -151,7 +151,8 @@ class VersionCatalogWriter : GLCatalog {
     val compose = plugins.find { it.id == "org.jetbrains.kotlin.plugin.compose" }
     val kotlin = plugins.find { it.id == "org.jetbrains.kotlin.android" }
     if (compose != null) {
-      require(kotlin != null && compose.versionRef == kotlin.versionRef &&
+      require(kotlin != null && (compose.versionRef != null || compose.version != null) &&
+        compose.versionRef == kotlin.versionRef &&
         (compose.versionRef != null || compose.version == kotlin.version)) {
         "The Kotlin Compose compiler plugin must use the exact Kotlin plugin version"
       }
