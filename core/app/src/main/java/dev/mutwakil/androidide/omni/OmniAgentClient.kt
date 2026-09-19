@@ -64,6 +64,16 @@ class OmniAgentClient(private val context: Context) {
     suspend fun gatewayManifest(): String =
         json.encodeToString(AgentGatewayManifest.serializer(), negotiate().manifest)
 
+    suspend fun supportsCanonicalHistory(): Boolean {
+        val negotiated = negotiate()
+        return negotiated.protocolVersion >= 4 && negotiated.manifest.supportsHistoryRead
+    }
+
+    suspend fun supportsEventReplay(): Boolean {
+        val negotiated = negotiate()
+        return negotiated.protocolVersion >= 4 && negotiated.manifest.supportsEventReplay
+    }
+
     suspend fun listConversations(
         query: AgentConversationQuery = AgentConversationQuery()
     ): AgentConversationList {
