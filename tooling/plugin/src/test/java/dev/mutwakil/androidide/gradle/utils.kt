@@ -35,6 +35,7 @@ internal fun buildProject(
   gradleVersion: String = BuildInfo.AGP_VERSION_GRADLE_LATEST,
   useApplyPluginGroovySyntax: Boolean = false,
   pluginTestEnv: Boolean = true,
+  tasks: List<String> = listOf(":app:tasks"),
   configureArgs: (MutableList<String>) -> Unit = {},
   vararg plugins: String
 ): BuildResult {
@@ -55,11 +56,14 @@ internal fun buildProject(
     }
   }
 
-  val args = mutableListOf(
-    ":app:tasks", // run any task, as long as it applies the plugins
-    "--init-script", initScript.pathString,
-    "--stacktrace"
-  )
+  require(tasks.isNotEmpty()) { "At least one Gradle task must be requested." }
+
+  val args = mutableListOf<String>().apply {
+    addAll(tasks)
+    add("--init-script")
+    add(initScript.pathString)
+    add("--stacktrace")
+  }
 
   if (pluginTestEnv) {
     // Plugins should use artifacts staged in build-local Maven repositories for integration tests.
