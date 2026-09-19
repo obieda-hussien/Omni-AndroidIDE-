@@ -42,7 +42,7 @@ env:
   # Build configuration
   BUILD_JAVA_VERSION: '21'
   BUILD_JAVA_DIST: 'adopt'
-  BUILD_IS_RELEASE: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/release/**' }}
+  BUILD_IS_RELEASE: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') }}
   ReleaseAndroidIDE: ${{ github.ref == 'refs/heads/main' }}
 
 jobs:
@@ -156,8 +156,8 @@ jobs:
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
-      - name: Run tooling API tests
-        run: ./gradlew :tooling:impl:build --continue
+      - name: Compile injected Gradle plugin and run tooling API tests
+        run: ./gradlew :tooling:plugin:compileKotlin :tooling:impl:build --continue
         env:
           ANDROIDIDE_TEST: true
           TEST_TOOLING_API_IMPL: true
@@ -257,5 +257,31 @@ jobs:
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
+      - name: Check snapshot publishing credentials
+        id: snapshot-publishing
+        shell: bash
+        run: |
+          missing=()
+          for variable in \
+            ORG_GRADLE_PROJECT_mavenCentralUsername \
+            ORG_GRADLE_PROJECT_mavenCentralPassword \
+            ORG_GRADLE_PROJECT_signingInMemoryKey \
+            ORG_GRADLE_PROJECT_signingInMemoryKeyId \
+            ORG_GRADLE_PROJECT_signingInMemoryKeyPassword
+          do
+            if [[ -z "${!variable:-}" ]]; then
+              missing+=("$variable")
+            fi
+          done
+
+          if (( ${#missing[@]} > 0 )); then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping Maven Central snapshot publishing because publishing/signing credentials are not configured."
+            printf 'Missing publishing variables: %s\n' "${missing[*]}"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish snapshots
+        if: steps.snapshot-publishing.outputs.enabled == 'true'
         run: ./gradlew publishAllPublicationsToMavenCentralRepository --stacktrace
