@@ -602,9 +602,9 @@ class OmniWorkspaceFragment : Fragment() {
 
             try {
                 activeClient.runTask(request).collect { event ->
-                    store.saveRunCursor(conversationId, taskId, event.sequence)
                     terminalReceived = applyAgentEvent(event, taskId, store) || terminalReceived
                     persistLocal(force = terminalReceived)
+                    store.saveRunCursor(conversationId, taskId, event.sequence)
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -714,9 +714,12 @@ class OmniWorkspaceFragment : Fragment() {
                 )
                 for (event in page.events) {
                     if (event.sequence <= afterSequence) continue
+                    val terminal = applyAgentEvent(event, taskId, store)
+                    store.saveTranscript(projectRoot, conversationId, localTranscript)
+                    store.saveConsole(projectRoot, conversationId, localConsole)
                     afterSequence = event.sequence
                     store.saveRunCursor(conversationId, taskId, afterSequence)
-                    if (applyAgentEvent(event, taskId, store)) return true
+                    if (terminal) return true
                 }
 
                 val snapshot = activeClient.taskSnapshot(taskId)
