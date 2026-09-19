@@ -47,6 +47,15 @@ public final class LogSenderConfig {
    */
   public static final String _PROPERTY_MAVEN_LOCAL_REPOSITORY = "androidide.plugins.internal.mavenLocalRepositories";
 
+  /**
+   * Absolute path to the LogSender AAR bundled with the currently installed AndroidIDE APK.
+   * AndroidIDE sets this property for normal project builds when the bundled artifact is ready.
+   *
+   * <p><b>This is an internal property and should not be manually set by users.</b>
+   */
+  public static final String _PROPERTY_LOGSENDER_LOCAL_AAR =
+      "androidide.plugins.internal.logsenderLocalAar";
+
   private LogSenderConfig() {
     throw new UnsupportedOperationException("This class cannot be instantiated.");
   }
