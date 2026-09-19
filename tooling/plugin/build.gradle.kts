@@ -16,7 +16,6 @@
  */
 
 
-import dev.mutwakil.androidide.build.config.AGP_VERSION_MINIMUM
 import dev.mutwakil.androidide.build.config.BuildConfig
 import dev.mutwakil.androidide.build.config.MVN_GROUP_ID
 import dev.mutwakil.androidide.build.config.ProjectConfig
@@ -28,34 +27,20 @@ plugins {
 }
 
 
-
 description = "Gradle Plugin for projects that are built with AndroidIDE"
 
 tasks.named<Test>("test") {
   useJUnitPlatform()
 }
 
-configurations {
-  val androidBuildTool = create("androidBuildTool")
-
-  getByName("compileOnly") {
-    extendsFrom(androidBuildTool)
-  }
-  getByName("testImplementation") {
-    extendsFrom(androidBuildTool)
-  }
-  findByName("integrationTestImplementation")?.run {
-    extendsFrom(androidBuildTool)
-  }
-}
-
 dependencies {
   implementation(projects.tooling.pluginConfig)
   implementation(projects.utilities.buildInfo)
 
-  // use the AGP APIs from the minimum supported AGP version
-  add("androidBuildTool", "com.android.tools.build:gradle:${AGP_VERSION_MINIMUM}")
-
+  // Keep AGP completely out of the plugin-under-test/runtime classpath.
+  // The injected AndroidIDE plugin must be loadable before/independently from the target
+  // project's AGP classloader. The TestKit sample project resolves AGP through its own
+  // com.android.application plugin declaration, which mirrors real AndroidIDE usage.
   testImplementation(gradleTestKit())
   testImplementation(libs.tests.junit.jupiter)
   testImplementation(libs.tests.google.truth)
