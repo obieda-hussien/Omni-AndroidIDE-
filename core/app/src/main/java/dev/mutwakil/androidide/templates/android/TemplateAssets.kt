@@ -14,8 +14,9 @@ import java.io.FileNotFoundException
  */
 internal object TemplateAssets {
 
-  fun install(context: Context, templateName: String, projectRoot: File) {
-    val root = "$templateName/gradle"
+  fun install(context: Context, templateName: String?, projectRoot: File) {
+    val template = requireNotNull(templateName) { "Unnamed project template" }
+    val root = "$template/gradle"
     copyFile(context, "$root/gradlew", File(projectRoot, "gradlew"))
     copyFile(context, "$root/gradlew.bat", File(projectRoot, "gradlew.bat"))
     copyDirectory(
@@ -25,17 +26,17 @@ internal object TemplateAssets {
     )
     val wrapper = File(projectRoot, "gradle/wrapper")
     require(File(wrapper, "gradle-wrapper.jar").isFile) {
-      "Missing gradle-wrapper.jar for $templateName"
+      "Missing gradle-wrapper.jar for $template"
     }
     require(File(wrapper, "gradle-wrapper.properties").isFile) {
-      "Missing gradle-wrapper.properties for $templateName"
+      "Missing gradle-wrapper.properties for $template"
     }
 
     // External Android storage may not support chmod. Do not mistake that for a missing script.
     File(projectRoot, "gradlew").setExecutable(true, false)
 
     val resources = File(projectRoot, "app/src/main/res")
-    copyDirectory(context, "$templateName/resources", resources)
+    copyDirectory(context, "$template/resources", resources)
     validateLauncherIcons(resources)
   }
 
