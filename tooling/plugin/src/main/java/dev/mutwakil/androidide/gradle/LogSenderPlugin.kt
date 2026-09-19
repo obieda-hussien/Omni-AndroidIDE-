@@ -17,12 +17,15 @@
 
 package dev.mutwakil.androidide.gradle
 
+import dev.mutwakil.androidide.tooling.api.LogSenderConfig._PROPERTY_LOGSENDER_LOCAL_AAR
 import org.gradle.api.Named
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.artifacts.Configuration
+import org.gradle.api.artifacts.Dependency
 import org.gradle.api.artifacts.ExternalModuleDependency
 import org.gradle.api.logging.Logging
+import java.io.File
 
 /**
  * Plugin to manage LogSender in Android applications.
@@ -171,40 +174,82 @@ class LogSenderPlugin : Plugin<Project> {
       return
     }
 
-    val logsenderDependency = dependencies.ideDependency(
-      LIB_GROUP_LOGGING,
-      LOGSENDER_DEPENDENCY_ARTIFACT,
-      isTestEnv
-    )
+    val resolved = resolveLogSenderDependency() ?: return
+    val logsenderDependency = resolved.first
+    val sourceDescription = resolved.second
 
     if (logsenderDependency is ExternalModuleDependency) {
-      // A new snapshot is published for each build. AndroidIDE pins the exact plugin version, so
-      // Gradle does not need to revalidate this dependency as a changing module on every sync.
+      // AndroidIDE pins the exact LogSender version. Avoid revalidating snapshot metadata on every
+      // project sync when remote fallback is used.
       logger.debug("Marking logsender dependency as not-changing")
       logsenderDependency.isChanging = false
-    }
 
-    val alreadyPresent = configuration.dependencies.any { existing ->
-      existing.group == logsenderDependency.group &&
-        existing.name == logsenderDependency.name &&
-        existing.version == logsenderDependency.version
-    }
+      val alreadyPresent = configuration.dependencies.any { existing ->
+        existing.group == logsenderDependency.group &&
+          existing.name == logsenderDependency.name &&
+          existing.version == logsenderDependency.version
+      }
 
-    if (alreadyPresent) {
-      logger.debug(
-        "LogSender dependency is already present in configuration '${configuration.name}' " +
-          "of project '$path'"
-      )
-      return
+      if (alreadyPresent) {
+        logger.debug(
+          "LogSender dependency is already present in configuration '${configuration.name}' " +
+            "of project '$path'"
+        )
+        return
+      }
     }
 
     configuration.dependencies.add(logsenderDependency)
 
     logger.lifecycle(
-      "Adding LogSender dependency (version '${logsenderDependency.version}') " +
+      "Adding LogSender dependency ($sourceDescription) " +
         "to debuggable build type '$buildType' via configuration '${configuration.name}' " +
         "of project '$path'"
     )
+  }
+
+  /**
+   * Prefer the LogSender AAR shipped in the same AndroidIDE APK as this plugin. This keeps internal,
+   * PR and offline builds self-contained and guarantees that the runtime matches the installed IDE.
+   *
+   * Released builds may fall back to the published Maven artifact. Commit-scoped SNAPSHOT builds
+   * must never attempt a remote fallback because those artifacts are not guaranteed to be
+   * published; missing optional instrumentation is preferable to failing the user's app build.
+   */
+  private fun Project.resolveLogSenderDependency(): Pair<Dependency, String>? {
+    val localAarPath = findProperty(_PROPERTY_LOGSENDER_LOCAL_AAR)
+      ?.toString()
+      ?.trim()
+      ?.takeIf { it.isNotEmpty() }
+
+    if (localAarPath != null) {
+      val localAar = File(localAarPath)
+      if (localAar.isFile && localAar.canRead()) {
+        logger.info("Using bundled LogSender AAR: ${localAar.absolutePath}")
+        return dependencies.create(files(localAar)) to
+          "bundled with AndroidIDE, file '${localAar.name}'"
+      }
+
+      logger.warn(
+        "AndroidIDE provided a bundled LogSender path that is unavailable: '$localAarPath'."
+      )
+    }
+
+    val version = depVersion(isTestEnv)
+    if (!isTestEnv && version.endsWith("-SNAPSHOT", ignoreCase = true)) {
+      logger.warn(
+        "Bundled LogSender is unavailable for internal version '$version'. " +
+          "Skipping optional LogSender instrumentation so the user's project can still build."
+      )
+      return null
+    }
+
+    val dependency = dependencies.ideDependency(
+      LIB_GROUP_LOGGING,
+      LOGSENDER_DEPENDENCY_ARTIFACT,
+      isTestEnv
+    )
+    return dependency to "version '${dependency.version}' from Maven"
   }
 
   private fun Project.findDependencyBucket(buildType: String): Configuration? {
