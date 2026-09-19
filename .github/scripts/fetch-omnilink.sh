@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${OMNILINK_VERSION:-v1.1.0}"
+VERSION="${OMNILINK_VERSION:-v1.2.0}"
 GROUP_PATH="com/github/obieda-hussien/OmniLinkSDK"
 ARTIFACT="OmniLinkSDK-${VERSION}"
 DEST_ROOT="${OMNILINK_LOCAL_REPO:-$PWD/ci-m2}"
