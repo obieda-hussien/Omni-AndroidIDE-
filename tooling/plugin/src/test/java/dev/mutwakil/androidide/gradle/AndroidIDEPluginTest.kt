@@ -19,7 +19,12 @@ package dev.mutwakil.androidide.gradle
 
 import com.google.common.truth.Truth.assertThat
 import dev.mutwakil.androidide.tooling.api.LogSenderConfig.PROPERTY_LOGSENDER_ENABLED
+import dev.mutwakil.androidide.tooling.api.LogSenderConfig._PROPERTY_LOGSENDER_LOCAL_AAR
 import org.junit.jupiter.api.Test
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 /**
  * @author Akash Yadav
@@ -54,5 +59,49 @@ class AndroidIDEPluginTest {
       it.add("--debug")
     })
     assertThat(result.output).contains("Marking logsender dependency as not-changing")
+  }
+
+  @Test
+  fun `test bundled logsender aar is preferred over maven`() {
+    val aar = createMinimalLogSenderAar()
+
+    val result = buildProject(configureArgs = {
+      it.add("-P$_PROPERTY_LOGSENDER_LOCAL_AAR=${aar.absolutePath}")
+    })
+
+    assertThat(result.output).contains("Using bundled LogSender AAR:")
+    assertThat(result.output).contains(
+      "Adding LogSender dependency (bundled with AndroidIDE, file '${aar.name}')"
+    )
+    assertThat(result.output).doesNotContain(
+      "Adding LogSender dependency (version '${depVersion(true)}' from Maven)"
+    )
+  }
+
+  private fun createMinimalLogSenderAar(): File {
+    val output = File("build/test-fixtures/logsender-local-test.aar")
+    output.parentFile.mkdirs()
+
+    val classesJar = ByteArrayOutputStream().use { bytes ->
+      ZipOutputStream(bytes).use { /* valid empty classes.jar */ }
+      bytes.toByteArray()
+    }
+
+    ZipOutputStream(output.outputStream().buffered()).use { zip ->
+      zip.putNextEntry(ZipEntry("AndroidManifest.xml"))
+      zip.write(
+        """
+        <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+            package="dev.mutwakil.androidide.logsender.test" />
+        """.trimIndent().toByteArray()
+      )
+      zip.closeEntry()
+
+      zip.putNextEntry(ZipEntry("classes.jar"))
+      zip.write(classesJar)
+      zip.closeEntry()
+    }
+
+    return output
   }
 }
