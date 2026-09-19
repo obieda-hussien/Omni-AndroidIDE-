@@ -8,6 +8,12 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.IBinder
 import com.omnilink.sdk.AgentTaskEvent
+import com.omnilink.sdk.AgentTaskSnapshot
+import com.omnilink.sdk.AgentTaskEventPage
+import com.omnilink.sdk.AgentConversationSnapshot
+import com.omnilink.sdk.AgentConversationReadQuery
+import com.omnilink.sdk.AgentConversationQuery
+import com.omnilink.sdk.AgentConversationList
 import com.omnilink.sdk.AgentTaskRequest
 import com.omnilink.sdk.IAgentGatewayService
 import com.omnilink.sdk.IOmniAgentCallback
@@ -23,6 +29,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * AndroidIDE -> Workspace connection. Workspace remains the only model/tool/MCP runtime.
@@ -48,6 +56,53 @@ class OmniAgentClient(private val context: Context) {
     suspend fun gatewayManifest(): String {
         val service = connect()
         return service.getGatewayManifest(OmniLinkConstants.CURRENT_PROTOCOL_VERSION)
+    }
+
+    suspend fun listConversations(
+        query: AgentConversationQuery = AgentConversationQuery()
+    ): AgentConversationList {
+        val raw = connect().listAgentConversations(
+            OmniLinkConstants.CURRENT_PROTOCOL_VERSION,
+            json.encodeToString(AgentConversationQuery.serializer(), query)
+        )
+        gatewayError(raw)?.let { throw IllegalStateException(it) }
+        return json.decodeFromString(AgentConversationList.serializer(), raw)
+    }
+
+    suspend fun getConversation(
+        conversationId: String,
+        query: AgentConversationReadQuery = AgentConversationReadQuery()
+    ): AgentConversationSnapshot {
+        val raw = connect().getAgentConversation(
+            OmniLinkConstants.CURRENT_PROTOCOL_VERSION,
+            conversationId,
+            json.encodeToString(AgentConversationReadQuery.serializer(), query)
+        )
+        gatewayError(raw)?.let { throw IllegalStateException(it) }
+        return json.decodeFromString(AgentConversationSnapshot.serializer(), raw)
+    }
+
+    suspend fun taskSnapshot(taskId: String): AgentTaskSnapshot {
+        val raw = connect().getTaskSnapshot(
+            OmniLinkConstants.CURRENT_PROTOCOL_VERSION,
+            taskId
+        )
+        return json.decodeFromString(AgentTaskSnapshot.serializer(), raw)
+    }
+
+    suspend fun replayTaskEvents(
+        taskId: String,
+        afterSequence: Long,
+        limit: Int = 50
+    ): AgentTaskEventPage {
+        val raw = connect().getTaskEvents(
+            OmniLinkConstants.CURRENT_PROTOCOL_VERSION,
+            taskId,
+            afterSequence.coerceAtLeast(0L),
+            limit.coerceIn(1, 50)
+        )
+        gatewayError(raw)?.let { throw IllegalStateException(it) }
+        return json.decodeFromString(AgentTaskEventPage.serializer(), raw)
     }
 
     fun runTask(request: AgentTaskRequest): Flow<AgentTaskEvent> = callbackFlow {
@@ -204,6 +259,15 @@ class OmniAgentClient(private val context: Context) {
                 }
             }
         }
+    }
+
+    private fun gatewayError(raw: String): String? {
+        val trimmed = raw.trim()
+        if (!trimmed.startsWith("{") || !trimmed.contains("\"error\"")) return null
+        return runCatching {
+            val element = json.parseToJsonElement(trimmed)
+            element.jsonObject["error"]?.jsonPrimitive?.content
+        }.getOrNull()
     }
 
     private fun discoverGateway(): ComponentName? {
