@@ -443,7 +443,7 @@ class ComposeEmptyActivity : Template {
           val stringsContent =
               """
                 <resources>
-                    <string name="app_name">${options.projectName}</string>
+                    <string name="app_name">${TemplateAssets.escapeXml(options.projectName)}</string>
                 </resources>
             """
                   .trimIndent()

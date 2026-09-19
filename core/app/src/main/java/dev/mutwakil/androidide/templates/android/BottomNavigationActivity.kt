@@ -399,14 +399,14 @@ class BottomNavigationActivity : Template {
           // Create settings.gradle.kts
           val settingsConfig = settingsGradleConfig {
             pluginManagement(
-                if (Options.OPT_USE_GRADLE_KTS) {
+                if (options.useKts) {
                   RepositoryPresets.STANDARD_KTS
                 } else {
                   RepositoryPresets.STANDARD_GROOVY
                 }
             )
             dependencyResolution(
-                if (Options.OPT_USE_GRADLE_KTS) {
+                if (options.useKts) {
                   RepositoryPresets.DEPENDENCY_RESOLUTION_KTS
                 } else {
                   RepositoryPresets.DEPENDENCY_RESOLUTION_GROOVY
@@ -417,7 +417,7 @@ class BottomNavigationActivity : Template {
           }
           settingsGradleWriter.writeToFile(
               projectRoot,
-              if (Options.OPT_USE_GRADLE_KTS) {
+              if (options.useKts) {
                 SettingsGradleFileType.KTS
               } else {
                 SettingsGradleFileType.GROOVY
@@ -648,7 +648,7 @@ class BottomNavigationActivity : Template {
           val stringsContent =
               """
                 <resources>
-                    <string name="app_name">${options.projectName}</string>
+                    <string name="app_name">${TemplateAssets.escapeXml(options.projectName)}</string>
                     <string name="title_home">Home</string>
                     <string name="title_dashboard">Dashboard</string>
                     <string name="title_notifications">Notifications</string>
