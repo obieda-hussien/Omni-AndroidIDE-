@@ -166,7 +166,7 @@ class OmniWorkspaceFragment : Fragment() {
             clipToPadding = false
             addView(
                 messagesColumn,
-                ScrollView.LayoutParams(
+                FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
                 )
@@ -1103,7 +1103,7 @@ class OmniWorkspaceFragment : Fragment() {
         }
 
         row.addView(TextView(requireContext()).apply {
-            text = "●"
+            this.text = "●"
             textSize = 22f
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
@@ -1148,7 +1148,7 @@ class OmniWorkspaceFragment : Fragment() {
             }
         )
         row.addView(TextView(requireContext()).apply {
-            text = "🤖"
+            this.text = "🤖"
             textSize = 21f
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
