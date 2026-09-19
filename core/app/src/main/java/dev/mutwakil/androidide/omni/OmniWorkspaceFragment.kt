@@ -703,6 +703,12 @@ class OmniWorkspaceFragment : Fragment() {
         store: OmniConversationStore
     ): Boolean {
         val activeClient = client ?: return false
+        val replaySupported = runCatching { activeClient.supportsEventReplay() }
+            .getOrDefault(false)
+        if (!replaySupported) {
+            return recoverLegacyTaskBySnapshot(taskId, store)
+        }
+
         var afterSequence = store.runCursor(conversationId)?.lastSequence ?: 0L
 
         while (true) {
@@ -757,6 +763,82 @@ class OmniWorkspaceFragment : Fragment() {
                     return true
                 }
                 showStatus("Reconnecting to Workspace… " + message)
+                delay(1_500L)
+            }
+        }
+    }
+
+    private suspend fun recoverLegacyTaskBySnapshot(
+        taskId: String,
+        store: OmniConversationStore
+    ): Boolean {
+        val activeClient = client ?: return false
+        while (true) {
+            try {
+                val snapshot = activeClient.taskSnapshot(taskId)
+                when (snapshot.state) {
+                    AgentTaskState.COMPLETED -> {
+                        val answer = snapshot.finalAnswer?.takeIf { it.isNotBlank() }
+                        if (answer != null) {
+                            if (activeAssistantView == null) {
+                                activeAssistantView = addAssistantBubble(answer)
+                            } else {
+                                activeAssistantView?.text = answer
+                            }
+                            streamedAssistant = StringBuilder(answer)
+
+                            val assistantMarker = "\n\nOmni: "
+                            val index = localTranscript.lastIndexOf(assistantMarker)
+                            localTranscript = if (index >= 0) {
+                                localTranscript.substring(0, index) + assistantMarker + answer
+                            } else {
+                                localTranscript + assistantMarker + answer
+                            }
+                            store.saveTranscript(projectRoot, conversationId, localTranscript)
+                        }
+                        finishLiveConsole(true)
+                        showStatus(
+                            "Completed • legacy Workspace snapshot restored. " +
+                                "Update Workspace to v1.2+ for event-by-event replay."
+                        )
+                        return true
+                    }
+                    AgentTaskState.FAILED -> {
+                        appendConsoleLine(
+                            "[LEGACY SNAPSHOT ERROR] " +
+                                (snapshot.error ?: "Agent task failed")
+                        )
+                        finishLiveConsole(false)
+                        showStatus("Failed • restored from Workspace snapshot")
+                        return true
+                    }
+                    AgentTaskState.CANCELLED -> {
+                        finishLiveConsole(false)
+                        showStatus("Cancelled")
+                        return true
+                    }
+                    AgentTaskState.QUEUED,
+                    AgentTaskState.RUNNING -> {
+                        showStatus(
+                            "Live task continues in Workspace • snapshot polling " +
+                                "(update Workspace to v1.2+ for replay)"
+                        )
+                    }
+                }
+                delay(1_000L)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                val message = error.message ?: error.javaClass.simpleName
+                val stale =
+                    message.contains("Unknown task id", ignoreCase = true) ||
+                        message.contains("task_not_found", ignoreCase = true)
+                if (stale) {
+                    store.clearRunCursor(conversationId)
+                    showStatus("Workspace no longer has this legacy live task.")
+                    return true
+                }
+                showStatus("Waiting for Workspace snapshot… " + message)
                 delay(1_500L)
             }
         }
