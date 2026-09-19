@@ -99,6 +99,7 @@ class AndroidIDEAssetsPlugin : Plugin<Project> {
                 )
 
                 registerAndroidIDEPluginApiJarCopierTask(variant,variantNameCapitalized)
+                registerLogSenderAarCopierTask(variant, variantNameCapitalized)
 
                 // Tooling API JAR copier
                 val copyToolingApiJar = tasks.register(
@@ -168,4 +169,21 @@ private inline fun <reified T : AddFileToAssetsTask> Project.addProjectArtifactT
         copyArtifactTask,
         AddFileToAssetsTask::outputDirectory,
     )
+}
+
+private fun Project.registerLogSenderAarCopierTask(
+    variant: Variant,
+    variantName: String,
+) {
+    val logSenderProjectPath = ":logging:logsender"
+    evaluationDependsOn(logSenderProjectPath)
+
+    addProjectArtifactToAssets<AddFileToAssetsTask>(
+        variant = variant,
+        taskName = "copy${variantName}LogSenderAar",
+        projectPath = logSenderProjectPath,
+        projectTask = "bundleReleaseAar",
+    ) { project ->
+        project.layout.buildDirectory.file("outputs/aar/logsender-release.aar")
+    }
 }

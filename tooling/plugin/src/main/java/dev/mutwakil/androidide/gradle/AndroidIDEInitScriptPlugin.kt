@@ -17,7 +17,6 @@
 
 package dev.mutwakil.androidide.gradle
 
-import dev.mutwakil.androidide.buildinfo.BuildInfo
 import dev.mutwakil.androidide.tooling.api.LogSenderConfig._PROPERTY_IS_TEST_ENV
 import dev.mutwakil.androidide.tooling.api.LogSenderConfig._PROPERTY_MAVEN_LOCAL_REPOSITORY
 import org.gradle.StartParameter
@@ -28,7 +27,6 @@ import org.gradle.api.invocation.Gradle
 import org.gradle.api.logging.Logging
 import java.io.File
 import java.io.FileNotFoundException
-import java.net.URI
 
 /**
  * Plugin for the AndroidIDE's Gradle Init Script.
@@ -116,13 +114,7 @@ class AndroidIDEInitScriptPlugin : Plugin<Gradle> {
     mavenLocalRepos: String
   ) {
 
-    if (!isMavenLocalEnabled) {
-
-      // For AndroidIDE CI builds
-      maven { repository ->
-        repository.url = URI.create(BuildInfo.SNAPSHOTS_REPOSITORY)
-      }
-    } else {
+    if (isMavenLocalEnabled) {
       logger.info("Using local maven repository for classpath resolution...")
 
       for (mavenLocalRepo in mavenLocalRepos.split(':')) {
@@ -143,13 +135,10 @@ class AndroidIDEInitScriptPlugin : Plugin<Gradle> {
       }
     }
 
-    // for AGP API dependency
+    // Resolve normal Android/project dependencies only from their canonical repositories.
+    // AndroidIDE's own injected plugin and LogSender runtime are shipped locally with the APK, so
+    // normal user builds do not need AndroidIDE-specific snapshot/public repository probes.
     google()
-
-    maven { repository ->
-      repository.setUrl(BuildInfo.PUBLIC_REPOSITORY)
-    }
-
     mavenCentral()
     gradlePluginPortal()
   }

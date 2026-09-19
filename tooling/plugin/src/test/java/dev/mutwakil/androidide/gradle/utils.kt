@@ -34,6 +34,8 @@ internal fun buildProject(
   agpVersion: String = BuildInfo.AGP_VERSION_LATEST,
   gradleVersion: String = BuildInfo.AGP_VERSION_GRADLE_LATEST,
   useApplyPluginGroovySyntax: Boolean = false,
+  pluginTestEnv: Boolean = true,
+  tasks: List<String> = listOf(":app:tasks"),
   configureArgs: (MutableList<String>) -> Unit = {},
   vararg plugins: String
 ): BuildResult {
@@ -54,15 +56,57 @@ internal fun buildProject(
     }
   }
 
-  val args = mutableListOf(
-    ":app:tasks", // run any task, as long as it applies the plugins
-    "--init-script", initScript.pathString,
-    "-P$_PROPERTY_IS_TEST_ENV=true", // plugins should be published to maven local first
-    "-P$_PROPERTY_MAVEN_LOCAL_REPOSITORY=$repositories",
-    "--stacktrace"
-  )
+  require(tasks.isNotEmpty()) { "At least one Gradle task must be requested." }
+
+  val args = mutableListOf<String>().apply {
+    addAll(tasks)
+    add("--init-script")
+    add(initScript.pathString)
+    add("--stacktrace")
+  }
+
+  if (pluginTestEnv) {
+    // Plugins should use artifacts staged in build-local Maven repositories for integration tests.
+    args.add("-P$_PROPERTY_IS_TEST_ENV=true")
+    args.add("-P$_PROPERTY_MAVEN_LOCAL_REPOSITORY=$repositories")
+  }
 
   configureArgs(args)
+
+  var testEnvironment: Map<String, String>? = null
+
+  // Gradle 7.x cannot run on JDK 21. Keep compatibility tests honest by forcing the minimum
+  // supported Gradle line onto JDK 17 from both directions:
+  // 1) JAVA_HOME/PATH for the forked TestKit process, and
+  // 2) org.gradle.java.home for the Gradle daemon itself.
+  //
+  // Setting only JAVA_HOME is insufficient when TestKit can reconnect to/reuse a daemon that was
+  // initially started by the JDK 21 test JVM.
+  if (gradleVersion.startsWith("7.")) {
+    val java17Home = System.getenv("JAVA_HOME_17_X64")
+      ?: System.getenv("JAVA_HOME_17")
+      ?: System.getenv("ANDROIDIDE_TEST_JAVA17_HOME")
+      ?: System.getProperty("java.home").takeIf {
+        Runtime.version().feature() <= 17
+      }
+
+    require(!java17Home.isNullOrBlank()) {
+      "Gradle $gradleVersion compatibility tests require JDK 17. " +
+        "Set JAVA_HOME_17_X64 or ANDROIDIDE_TEST_JAVA17_HOME."
+    }
+
+    args.add("-Dorg.gradle.java.home=$java17Home")
+
+    testEnvironment = System.getenv().toMutableMap().apply {
+      this["JAVA_HOME"] = java17Home
+      this["PATH"] = java17Home + File.separator + "bin" +
+        File.pathSeparator + getOrDefault("PATH", "")
+      this["GRADLE_OPTS"] = listOfNotNull(
+        get("GRADLE_OPTS")?.takeIf { it.isNotBlank() },
+        "-Dorg.gradle.java.home=$java17Home"
+      ).joinToString(" ")
+    }
+  }
 
   val runner = GradleRunner.create()
     .withProjectDir(projectRoot.toFile())
@@ -70,6 +114,8 @@ internal fun buildProject(
     .withArguments(
       *args.toTypedArray()
     )
+
+  testEnvironment?.let { runner.withEnvironment(it) }
 
   writeInitScript(
     initScript.toFile(),

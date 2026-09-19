@@ -54,7 +54,7 @@ class AndroidIDEGradlePlugin : Plugin<Project> {
 
         if (isLogSenderEnabled) {
           logger.info("Trying to apply LogSender plugin to project '${project.path}'")
-          pluginManager.apply(LogSenderPlugin::class.java)
+          applyLogSenderSafely()
         } else {
           logger.warn(
             "LogSender is disabled for project '${project.path}'. " +
@@ -62,6 +62,30 @@ class AndroidIDEGradlePlugin : Plugin<Project> {
           )
         }
       }
+    }
+  }
+
+  /**
+   * LogSender is an IDE convenience feature and must never make the user's actual project
+   * unconfigurable. In particular, LinkageError covers classloader/API mismatches such as a
+   * missing AGP ApplicationVariant class, while RuntimeException covers Gradle plugin application
+   * failures. Both cases degrade gracefully to a build without LogSender.
+   */
+  private fun Project.applyLogSenderSafely() {
+    try {
+      pluginManager.apply(LogSenderPlugin::class.java)
+    } catch (error: LinkageError) {
+      logger.warn(
+        "LogSender is incompatible with the current Android Gradle Plugin/classloader for " +
+          "project '$path'. Continuing project configuration without LogSender.",
+        error
+      )
+    } catch (error: RuntimeException) {
+      logger.warn(
+        "LogSender could not be configured for project '$path'. " +
+          "Continuing project configuration without LogSender.",
+        error
+      )
     }
   }
 }

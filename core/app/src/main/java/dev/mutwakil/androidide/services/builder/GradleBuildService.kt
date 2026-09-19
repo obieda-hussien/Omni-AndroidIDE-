@@ -46,6 +46,7 @@ import dev.mutwakil.androidide.tooling.api.ForwardingToolingApiClient
 import dev.mutwakil.androidide.tooling.api.IToolingApiClient
 import dev.mutwakil.androidide.tooling.api.IToolingApiServer
 import dev.mutwakil.androidide.tooling.api.LogSenderConfig.PROPERTY_LOGSENDER_ENABLED
+import dev.mutwakil.androidide.tooling.api.LogSenderConfig._PROPERTY_LOGSENDER_LOCAL_AAR
 import dev.mutwakil.androidide.tooling.api.messages.InitializeProjectParams
 import dev.mutwakil.androidide.tooling.api.messages.LogMessageParams
 import dev.mutwakil.androidide.tooling.api.messages.TaskExecutionMessage
@@ -365,6 +366,18 @@ class GradleBuildService : Service(), BuildService, IToolingApiClient,
     // The one downloaded from Maven is not built for Android
     extraArgs.add("-Pandroid.aapt2FromMavenOverride=" + Environment.AAPT2.absolutePath)
     extraArgs.add("-P${PROPERTY_LOGSENDER_ENABLED}=${DevOpsPreferences.logsenderEnabled}")
+
+    if (ToolsManager.isBundledLogSenderReady()) {
+      extraArgs.add(
+        "-P${_PROPERTY_LOGSENDER_LOCAL_AAR}=${Environment.ANDROIDIDE_LOGSENDER_AAR.absolutePath}"
+      )
+    } else if (DevOpsPreferences.logsenderEnabled) {
+      log.warn(
+        "Bundled LogSender runtime is unavailable. " +
+          "The Gradle plugin will degrade gracefully instead of failing the user's build."
+      )
+    }
+
     if (BuildPreferences.isStacktraceEnabled) {
       extraArgs.add("--stacktrace")
     }

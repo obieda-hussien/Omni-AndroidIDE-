@@ -40,6 +40,7 @@ import java.util.Arrays;
 import java.util.Properties;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.zip.ZipFile;
 
 import kotlin.io.ConstantsKt;
 import kotlin.io.FilesKt;
@@ -50,6 +51,7 @@ public class ToolsManager {
 
   public static String COMMON_ASSET_DATA_DIR = "data/common";
   private static final AtomicBoolean GRADLE_INTEGRATION_VERIFIED = new AtomicBoolean(false);
+  private static final AtomicBoolean LOGSENDER_AAR_READY = new AtomicBoolean(false);
 
   public static void init(@NonNull BaseApplication app, Runnable onFinish) {
 
@@ -96,6 +98,7 @@ public class ToolsManager {
     }
 
     refreshAndroidIdeGradlePlugin();
+    refreshBundledLogSender();
     refreshInitScript();
     GRADLE_INTEGRATION_VERIFIED.set(true);
   }
@@ -119,6 +122,66 @@ public class ToolsManager {
       FileUtils.delete(temp);
       throw new IllegalStateException("Failed to activate AndroidIDE Gradle plugin");
     }
+  }
+
+  /**
+   * Refreshes the LogSender AAR shipped inside the currently installed APK.
+   *
+   * LogSender is optional for project builds, so extraction failures must not block Gradle itself.
+   * The readiness flag prevents a stale AAR left by an older APK from being injected after a
+   * failed refresh.
+   */
+  private static void refreshBundledLogSender() {
+    LOGSENDER_AAR_READY.set(false);
+
+    final var target = Environment.ANDROIDIDE_LOGSENDER_AAR;
+    final var temp = new File(target.getParentFile(), target.getName() + ".new");
+
+    FileUtils.delete(temp);
+    if (!ResourceUtils.copyFileFromAssets(
+        getCommonAsset("logsender-release.aar"),
+        temp.getAbsolutePath())) {
+      FileUtils.delete(temp);
+      LOG.warn("Bundled LogSender AAR is missing from APK assets; project builds will continue without it");
+      return;
+    }
+
+    if (target.exists() && !FileUtils.delete(target)) {
+      FileUtils.delete(temp);
+      LOG.warn("Unable to replace stale bundled LogSender AAR; project builds will continue without it");
+      return;
+    }
+
+    if (!temp.renameTo(target)) {
+      FileUtils.delete(temp);
+      LOG.warn("Unable to activate bundled LogSender AAR; project builds will continue without it");
+      return;
+    }
+
+    if (!isValidLogSenderAar(target)) {
+      FileUtils.delete(target);
+      LOG.warn("Bundled LogSender AAR failed integrity validation; project builds will continue without it");
+      return;
+    }
+
+    LOGSENDER_AAR_READY.set(true);
+  }
+
+  private static boolean isValidLogSenderAar(@NonNull File aar) {
+    if (!aar.isFile() || !aar.canRead() || aar.length() <= 0L) {
+      return false;
+    }
+
+    try (ZipFile zip = new ZipFile(aar)) {
+      return zip.getEntry("AndroidManifest.xml") != null && zip.getEntry("classes.jar") != null;
+    } catch (IOException error) {
+      LOG.warn("Failed validating bundled LogSender AAR", error);
+      return false;
+    }
+  }
+
+  public static boolean isBundledLogSenderReady() {
+    return LOGSENDER_AAR_READY.get();
   }
   
   private static void extractDownloadKtScript() {

@@ -63,6 +63,7 @@ public final class Environment {
   private static final String ANDROID_JAR_HOME = ANDROID_HOME + "/platforms/android-37.0";
 
   public static File ANDROIDIDE_GRADLE_PLUGIN_JAR;
+  public static File ANDROIDIDE_LOGSENDER_AAR;
 
   public static File TOOLING_API_JAR;
 
@@ -89,8 +90,9 @@ public final class Environment {
     ANDROID_JAR = new File(ANDROIDIDE_HOME, "android.jar");
     TOOLING_API_JAR = new File(mkdirIfNotExists(new File(ANDROIDIDE_HOME, "tooling-api")),
       "tooling-api-all.jar");
-    ANDROIDIDE_GRADLE_PLUGIN_JAR = new File(mkdirIfNotExists(new File(ANDROIDIDE_HOME, "plugin")),
-            "androidide-gradle-plugin.jar");
+    final File androidIdePluginDir = mkdirIfNotExists(new File(ANDROIDIDE_HOME, "plugin"));
+    ANDROIDIDE_GRADLE_PLUGIN_JAR = new File(androidIdePluginDir, "androidide-gradle-plugin.jar");
+    ANDROIDIDE_LOGSENDER_AAR = new File(androidIdePluginDir, "logsender.aar");
     AAPT2 = new File(ANDROIDIDE_HOME, "aapt2");
     ANDROIDIDE_UI = mkdirIfNotExists(new File(ANDROIDIDE_HOME, "ui"));
     DOWNLOAD_KT_SCRIPT = new File(mkdirIfNotExists(new File(ANDROIDIDE_HOME, "scripts")),
