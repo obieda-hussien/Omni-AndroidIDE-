@@ -223,6 +223,27 @@ jobs:
           sha512sum *.apk > build/CHECKSUMS-sha512.txt
           
           find build -type f -name "CHECKSUMS*.txt" -exec echo {} \; -exec cat {} \; -exec echo "" \;
+      - name: Verify release publishing credentials
+        shell: bash
+        run: |
+          missing=()
+          for variable in \
+            ORG_GRADLE_PROJECT_mavenCentralUsername \
+            ORG_GRADLE_PROJECT_mavenCentralPassword \
+            ORG_GRADLE_PROJECT_signingInMemoryKey \
+            ORG_GRADLE_PROJECT_signingInMemoryKeyId \
+            ORG_GRADLE_PROJECT_signingInMemoryKeyPassword
+          do
+            if [[ -z "${!variable:-}" ]]; then
+              missing+=("$variable")
+            fi
+          done
+
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Missing release publishing variables: %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
+
       - name: Publish release
         run: ./gradlew nyxMake nyxMark nyxPublish publish release --stacktrace
       - name: Archive Nyx state file
