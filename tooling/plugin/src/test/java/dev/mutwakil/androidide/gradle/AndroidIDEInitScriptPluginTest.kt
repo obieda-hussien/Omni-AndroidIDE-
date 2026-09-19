@@ -63,7 +63,7 @@ class AndroidIDEInitScriptPluginTest {
     // One build-type-scoped bucket covers every product flavor that uses that debuggable build
     // type (demoDebug, fullDebug, and any future flavor) without depending on AGP variant classes.
     assertThat(result.output).contains(
-      "Adding LogSender dependency (version '${depVersion(true)}') " +
+      "Adding LogSender dependency (version '${depVersion(true)}' from Maven) " +
         "to debuggable build type 'debug' via configuration 'debugRuntimeOnly' " +
         "of project ':app'"
     )
