@@ -106,6 +106,32 @@ jobs:
         run: |
           build_type=${{ matrix.build_type }}
           ./gradlew :core:app:assemble${build_type^}
+      - name: Verify bundled AndroidIDE tooling assets
+        shell: bash
+        run: |
+          shopt -s nullglob
+          apks=(core/app/build/outputs/apk/${{ matrix.build_type }}/app-*.apk)
+
+          if (( ${#apks[@]} == 0 )); then
+            echo "::error::No ${{ matrix.build_type }} APKs were produced."
+            exit 1
+          fi
+
+          required_assets=(
+            "assets/data/common/androidide-gradle-plugin.jar"
+            "assets/data/common/tooling-api-all.jar"
+            "assets/data/common/logsender-release.aar"
+            "assets/data/common/androidide.init.gradle"
+          )
+
+          for apk in "${apks[@]}"; do
+            for asset in "${required_assets[@]}"; do
+              if ! unzip -l "$apk" "$asset" | grep -Fq "$asset"; then
+                echo "::error file=$apk::Missing required AndroidIDE runtime asset: $asset"
+                exit 1
+              fi
+            done
+          done
       - name: Copy ${{ matrix.build_type }} APK
         run: |
           cp core/app/build/outputs/apk/${{ matrix.build_type }}/app-*.apk ./
