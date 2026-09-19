@@ -551,6 +551,7 @@ class OmniWorkspaceFragment : Fragment() {
         val activeClient = client ?: return
         val taskId = "androidide-task-" + UUID.randomUUID()
         currentTaskId = taskId
+        store.saveRunCursor(conversationId, taskId, 0L)
         updateSendState(true)
         showStatus("Collecting live AndroidIDE context…")
 
@@ -586,7 +587,7 @@ class OmniWorkspaceFragment : Fragment() {
             )
             if (needsTitle && title != null) store.setTitle(projectRoot, conversationId, title)
 
-            var streamed = false
+            var terminalReceived = false
             var lastLocalCheckpoint = 0L
 
             fun persistLocal(force: Boolean = false) {
@@ -599,87 +600,151 @@ class OmniWorkspaceFragment : Fragment() {
 
             try {
                 activeClient.runTask(request).collect { event ->
-                    when (event) {
-                        is AgentTaskEvent.Started -> {
-                            showStatus("Running • saved in Workspace as “${event.conversationTitle}”")
-                            store.setTitle(projectRoot, conversationId, event.conversationTitle)
-                            refreshHistory()
-                        }
-                        is AgentTaskEvent.Status -> {
-                            showStatus(
-                                event.label + (event.detail?.let { " • $it" } ?: "")
-                            )
-                            appendConsoleLine(
-                                "[STATUS] ${event.label}" +
-                                    (event.detail?.let { " • $it" } ?: "")
-                            )
-                        }
-                        is AgentTaskEvent.StreamChunk -> {
-                            streamed = true
-                            streamedAssistant?.append(event.delta)
-                            localTranscript += event.delta
-                            activeAssistantView?.text = streamedAssistant.toString()
-                            scrollMessagesToBottom()
-                        }
-                        is AgentTaskEvent.Console -> {
-                            val marker = if (event.isError) "ERROR" else event.kind.uppercase()
-                            appendConsoleLine(
-                                "[$marker] ${event.name ?: event.kind}: ${event.summary}"
-                            )
-                            event.detail?.takeIf { it.isNotBlank() }?.let {
-                                appendConsoleLine(it.take(3_500))
-                            }
-                        }
-                        is AgentTaskEvent.FinalAnswer -> {
-                            if (!streamed) {
-                                streamedAssistant?.append(event.content)
-                                localTranscript += event.content
-                                activeAssistantView?.text = event.content
-                            } else if (event.content.isNotBlank()) {
-                                activeAssistantView?.text = event.content
-                            }
-                            localTranscript += "\n"
-                            finishLiveConsole(true)
-                            showStatus("Completed • history and Agent Console saved in Workspace")
-                        }
-                        is AgentTaskEvent.Error -> {
-                            val message = "⚠ ${event.message}"
-                            if (streamedAssistant.isNullOrEmpty()) {
-                                streamedAssistant?.append(message)
-                                localTranscript += message
-                                activeAssistantView?.text = message
-                            }
-                            appendConsoleLine("[ERROR/${event.code}] ${event.message}")
-                            finishLiveConsole(false)
-                            showStatus("Failed: ${event.code}")
-                        }
-                        is AgentTaskEvent.Cancelled -> {
-                            appendConsoleLine("[CANCELLED] $taskId")
-                            finishLiveConsole(false)
-                            showStatus("Cancelled")
-                        }
-                    }
-
-                    persistLocal(
-                        force = event is AgentTaskEvent.FinalAnswer ||
-                            event is AgentTaskEvent.Error ||
-                            event is AgentTaskEvent.Cancelled
-                    )
+                    store.saveRunCursor(conversationId, taskId, event.sequence)
+                    terminalReceived = applyAgentEvent(event, taskId, store) || terminalReceived
+                    persistLocal(force = terminalReceived)
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (error: Exception) {
-                val message = error.message ?: "Omni connection failed"
-                if (streamedAssistant.isNullOrEmpty()) {
-                    activeAssistantView?.text = "⚠ $message"
-                    localTranscript += "⚠ $message"
-                }
-                appendConsoleLine("[CONNECTION ERROR] $message")
-                finishLiveConsole(false)
-                showStatus("Connection failed")
+                appendConsoleLine(
+                    "[LINK] Live callback interrupted: " +
+                        (error.message ?: error.javaClass.simpleName)
+                )
+                showStatus("Connection interrupted • reconnecting from saved event sequence…")
+                terminalReceived = recoverExistingTask(taskId, store)
             } finally {
+                if (terminalReceived) {
+                    store.clearRunCursor(conversationId)
+                    runCatching { syncConversationFromWorkspace(conversationId) }
+                }
                 currentTaskId = null
                 updateSendState(false)
                 persistLocal(force = true)
                 refreshHistory()
+            }
+        }
+    }
+
+    private fun applyAgentEvent(
+        event: AgentTaskEvent,
+        taskId: String,
+        store: OmniConversationStore
+    ): Boolean {
+        when (event) {
+            is AgentTaskEvent.Started -> {
+                showStatus("Running • saved in Workspace as “" + event.conversationTitle + "”")
+                store.setTitle(projectRoot, conversationId, event.conversationTitle)
+                refreshHistory()
+            }
+            is AgentTaskEvent.Status -> {
+                showStatus(event.label + (event.detail?.let { " • " + it } ?: ""))
+                appendConsoleLine(
+                    "[STATUS] " + event.label +
+                        (event.detail?.let { " • " + it } ?: "")
+                )
+            }
+            is AgentTaskEvent.StreamChunk -> {
+                if (activeAssistantView == null) activeAssistantView = addAssistantBubble("")
+                if (streamedAssistant == null) streamedAssistant = StringBuilder()
+                streamedAssistant?.append(event.delta)
+                localTranscript += event.delta
+                activeAssistantView?.text = streamedAssistant.toString()
+                scrollMessagesToBottom()
+            }
+            is AgentTaskEvent.Console -> {
+                val marker = if (event.isError) "ERROR" else event.kind.uppercase()
+                appendConsoleLine(
+                    "[" + marker + "] " + (event.name ?: event.kind) + ": " + event.summary
+                )
+                event.detail?.takeIf { it.isNotBlank() }?.let {
+                    appendConsoleLine(it.take(3_500))
+                }
+            }
+            is AgentTaskEvent.FinalAnswer -> {
+                if (activeAssistantView == null) activeAssistantView = addAssistantBubble("")
+                if (streamedAssistant.isNullOrEmpty()) {
+                    streamedAssistant = StringBuilder(event.content)
+                    localTranscript += event.content
+                }
+                activeAssistantView?.text = event.content
+                localTranscript += "\n"
+                finishLiveConsole(true)
+                showStatus("Completed • canonical history + Agent Console saved in Workspace")
+                return true
+            }
+            is AgentTaskEvent.Error -> {
+                val message = "⚠ " + event.message
+                if (activeAssistantView == null) activeAssistantView = addAssistantBubble("")
+                if (streamedAssistant.isNullOrEmpty()) {
+                    streamedAssistant = StringBuilder(message)
+                    localTranscript += message
+                    activeAssistantView?.text = message
+                }
+                appendConsoleLine("[ERROR/" + event.code + "] " + event.message)
+                finishLiveConsole(false)
+                showStatus("Failed: " + event.code)
+                return true
+            }
+            is AgentTaskEvent.Cancelled -> {
+                appendConsoleLine("[CANCELLED] " + taskId)
+                finishLiveConsole(false)
+                showStatus("Cancelled")
+                return true
+            }
+        }
+        return false
+    }
+
+    private suspend fun recoverExistingTask(
+        taskId: String,
+        store: OmniConversationStore
+    ): Boolean {
+        val activeClient = client ?: return false
+        var afterSequence = store.runCursor(conversationId)?.lastSequence ?: 0L
+
+        while (true) {
+            try {
+                val page = activeClient.replayTaskEvents(
+                    taskId = taskId,
+                    afterSequence = afterSequence,
+                    limit = 50
+                )
+                for (event in page.events) {
+                    if (event.sequence <= afterSequence) continue
+                    afterSequence = event.sequence
+                    store.saveRunCursor(conversationId, taskId, afterSequence)
+                    if (applyAgentEvent(event, taskId, store)) return true
+                }
+
+                val snapshot = activeClient.taskSnapshot(taskId)
+                when (snapshot.state) {
+                    AgentTaskState.COMPLETED -> {
+                        showStatus("Completed • restoring canonical Workspace history…")
+                        return true
+                    }
+                    AgentTaskState.FAILED -> {
+                        showStatus("Failed • restoring saved Workspace checkpoint…")
+                        return true
+                    }
+                    AgentTaskState.CANCELLED -> {
+                        showStatus("Cancelled")
+                        return true
+                    }
+                    AgentTaskState.QUEUED,
+                    AgentTaskState.RUNNING -> {
+                        showStatus("Live • resumed from event #" + afterSequence)
+                    }
+                }
+                delay(if (page.hasMore) 50L else 550L)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                showStatus(
+                    "Reconnecting to Workspace… " +
+                        (error.message ?: error.javaClass.simpleName)
+                )
+                delay(1_500L)
             }
         }
     }
