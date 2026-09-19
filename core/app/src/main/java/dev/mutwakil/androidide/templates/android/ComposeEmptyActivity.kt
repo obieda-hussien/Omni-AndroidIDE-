@@ -499,7 +499,7 @@ val now = System.currentTimeMillis().toString()
   /** Create Compose theme files (Color.kt, Type.kt, Theme.kt) */
   private fun createComposeTheme(projectRoot: File, packageId: String) {
     val themeDir =
-        File(projectRoot, "app/src/main/$projectLang/${packageId.replace('.', '/')}/ui/theme")
+        File(projectRoot, "app/src/main/kotlin/${packageId.replace('.', '/')}/ui/theme")
     themeDir.mkdirs()
 
     // Color.kt
