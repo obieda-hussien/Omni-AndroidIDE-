@@ -103,7 +103,15 @@ fun Project.configureMavenPublish() {
 
     coordinates(project.group.toString(), project.name, project.publishingVersion)
     publishToMavenCentral()
-    signAllPublications()
+
+    if (project.hasInMemorySigningCredentials()) {
+      signAllPublications()
+    } else {
+      project.logger.info(
+        "Maven publication signing is disabled for '${project.path}' because complete " +
+          "in-memory signing credentials are not configured."
+      )
+    }
 
     if (plugins.hasPlugin("com.android.library")) {
       configure(AndroidMultiVariantLibrary())
@@ -146,5 +154,15 @@ private fun Project.configureMavenLocal() {
     tasks.getByName("publishAllPublicationsToBuildMavenLocalRepository") {
       dependsOn(tasks.getByName("deleteBuildMavenLocal"))
     }
+  }
+}
+
+private fun Project.hasInMemorySigningCredentials(): Boolean {
+  return listOf(
+    "signingInMemoryKey",
+    "signingInMemoryKeyId",
+    "signingInMemoryKeyPassword"
+  ).all { propertyName ->
+    !providers.gradleProperty(propertyName).orNull.isNullOrBlank()
   }
 }
