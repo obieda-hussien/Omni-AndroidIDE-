@@ -42,7 +42,7 @@ env:
   # Build configuration
   BUILD_JAVA_VERSION: '21'
   BUILD_JAVA_DIST: 'adopt'
-  BUILD_IS_RELEASE: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/release/**' }}
+  BUILD_IS_RELEASE: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') }}
   ReleaseAndroidIDE: ${{ github.ref == 'refs/heads/main' }}
 
 jobs:
@@ -106,6 +106,32 @@ jobs:
         run: |
           build_type=${{ matrix.build_type }}
           ./gradlew :core:app:assemble${build_type^}
+      - name: Verify bundled AndroidIDE tooling assets
+        shell: bash
+        run: |
+          shopt -s nullglob
+          apks=(core/app/build/outputs/apk/${{ matrix.build_type }}/app-*.apk)
+
+          if (( ${#apks[@]} == 0 )); then
+            echo "::error::No ${{ matrix.build_type }} APKs were produced."
+            exit 1
+          fi
+
+          required_assets=(
+            "assets/data/common/androidide-gradle-plugin.jar"
+            "assets/data/common/tooling-api-all.jar"
+            "assets/data/common/logsender-release.aar"
+            "assets/data/common/androidide.init.gradle"
+          )
+
+          for apk in "${apks[@]}"; do
+            for asset in "${required_assets[@]}"; do
+              if ! unzip -l "$apk" "$asset" | grep -Fq "$asset"; then
+                echo "::error file=$apk::Missing required AndroidIDE runtime asset: $asset"
+                exit 1
+              fi
+            done
+          done
       - name: Copy ${{ matrix.build_type }} APK
         run: |
           cp core/app/build/outputs/apk/${{ matrix.build_type }}/app-*.apk ./
@@ -140,6 +166,11 @@ jobs:
         with:
           submodules: 'recursive'
           fetch-depth: 0
+      - name: Set up JDK 17 for Gradle 7 compatibility tests
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          java-version: '17'
+          distribution: ${{ env.BUILD_JAVA_DIST }}
       - name: Set up JDK 21
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
@@ -156,8 +187,8 @@ jobs:
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
-      - name: Run tooling API tests
-        run: ./gradlew :tooling:impl:build --continue
+      - name: Verify injected Gradle plugin and run tooling API tests
+        run: ./gradlew :tooling:plugin:verifyLogSenderAgpIsolation :tooling:plugin:test :tooling:impl:build --continue
         env:
           ANDROIDIDE_TEST: true
           TEST_TOOLING_API_IMPL: true
@@ -221,6 +252,27 @@ jobs:
           sha512sum *.apk > build/CHECKSUMS-sha512.txt
           
           find build -type f -name "CHECKSUMS*.txt" -exec echo {} \; -exec cat {} \; -exec echo "" \;
+      - name: Verify release publishing credentials
+        shell: bash
+        run: |
+          missing=()
+          for variable in \
+            ORG_GRADLE_PROJECT_mavenCentralUsername \
+            ORG_GRADLE_PROJECT_mavenCentralPassword \
+            ORG_GRADLE_PROJECT_signingInMemoryKey \
+            ORG_GRADLE_PROJECT_signingInMemoryKeyId \
+            ORG_GRADLE_PROJECT_signingInMemoryKeyPassword
+          do
+            if [[ -z "${!variable:-}" ]]; then
+              missing+=("$variable")
+            fi
+          done
+
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Missing release publishing variables: %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
+
       - name: Publish release
         run: ./gradlew nyxMake nyxMark nyxPublish publish release --stacktrace
       - name: Archive Nyx state file
@@ -257,5 +309,31 @@ jobs:
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
+      - name: Check snapshot publishing credentials
+        id: snapshot-publishing
+        shell: bash
+        run: |
+          missing=()
+          for variable in \
+            ORG_GRADLE_PROJECT_mavenCentralUsername \
+            ORG_GRADLE_PROJECT_mavenCentralPassword \
+            ORG_GRADLE_PROJECT_signingInMemoryKey \
+            ORG_GRADLE_PROJECT_signingInMemoryKeyId \
+            ORG_GRADLE_PROJECT_signingInMemoryKeyPassword
+          do
+            if [[ -z "${!variable:-}" ]]; then
+              missing+=("$variable")
+            fi
+          done
+
+          if (( ${#missing[@]} > 0 )); then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping Maven Central snapshot publishing because publishing/signing credentials are not configured."
+            printf 'Missing publishing variables: %s\n' "${missing[*]}"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish snapshots
+        if: steps.snapshot-publishing.outputs.enabled == 'true'
         run: ./gradlew publishAllPublicationsToMavenCentralRepository --stacktrace

@@ -115,7 +115,7 @@ class NavigationDrawerActivity : Template {
           Log.d(TAG, "Project structure created successfully")
 
           // Copy wrapper files (gradlew, gradle folder)
-          copyWrapperFiles(context, projectRoot)
+          TemplateAssets.install(context, ASSETS_BASE_PATH, projectRoot)
 
           // Create version catalog
           val versions = buildList {
@@ -399,14 +399,14 @@ class NavigationDrawerActivity : Template {
           // Create settings.gradle.kts
           val settingsConfig = settingsGradleConfig {
             pluginManagement(
-                if (Options.OPT_USE_GRADLE_KTS) {
+                if (options.useKts) {
                   RepositoryPresets.STANDARD_KTS
                 } else {
                   RepositoryPresets.STANDARD_GROOVY
                 }
             )
             dependencyResolution(
-                if (Options.OPT_USE_GRADLE_KTS) {
+                if (options.useKts) {
                   RepositoryPresets.DEPENDENCY_RESOLUTION_KTS
                 } else {
                   RepositoryPresets.DEPENDENCY_RESOLUTION_GROOVY
@@ -417,7 +417,7 @@ class NavigationDrawerActivity : Template {
           }
           settingsGradleWriter.writeToFile(
               projectRoot,
-              if (Options.OPT_USE_GRADLE_KTS) {
+              if (options.useKts) {
                 SettingsGradleFileType.KTS
               } else {
                 SettingsGradleFileType.GROOVY
@@ -451,7 +451,7 @@ class NavigationDrawerActivity : Template {
             defaultConfig(
                 DefaultConfig(
                     applicationId = packageHelper.getPackageId(),
-                    minSdk = Options.OPT_MIN_SDK,
+                    minSdk = options.minSdk,
                     targetSdk = 36,
                     versionCode = 1,
                     versionName = "1.0",
@@ -518,7 +518,7 @@ class NavigationDrawerActivity : Template {
           activityWriter.writeToFile(projectRoot, activityConfig)
 
           // Copy additional resource files from assets
-          copyResourceFiles(context, projectRoot)
+          // Mandatory resources were installed and verified together with the Gradle wrapper.
 
           // Professional UI component structure setup
           val uiComponents = listOf("gallery", "home", "slideshow")
@@ -616,7 +616,7 @@ class NavigationDrawerActivity : Template {
           val stringsContent =
               """
                 <resources>
-                    <string name="app_name">${options.projectName}</string>
+                    <string name="app_name">${TemplateAssets.escapeXml(options.projectName)}</string>
                     <string name="navigation_drawer_open">Open navigation drawer</string>
                     <string name="navigation_drawer_close">Close navigation drawer</string>
                     <string name="nav_header_title">Android Studio</string>
@@ -654,7 +654,7 @@ class NavigationDrawerActivity : Template {
             val now = System.currentTimeMillis().toString()
         
             val projectModel = RecentProject(
-                    location = projectRoot!!.path,
+                    location = projectRoot.path,
                     name = options.projectName,
                     createdAt = now,
                     lastModified = now,

@@ -16,7 +16,6 @@
  */
 
 
-import dev.mutwakil.androidide.build.config.AGP_VERSION_MINIMUM
 import dev.mutwakil.androidide.build.config.BuildConfig
 import dev.mutwakil.androidide.build.config.MVN_GROUP_ID
 import dev.mutwakil.androidide.build.config.ProjectConfig
@@ -28,34 +27,20 @@ plugins {
 }
 
 
-
 description = "Gradle Plugin for projects that are built with AndroidIDE"
 
 tasks.named<Test>("test") {
   useJUnitPlatform()
 }
 
-configurations {
-  val androidBuildTool = create("androidBuildTool")
-
-  getByName("compileOnly") {
-    extendsFrom(androidBuildTool)
-  }
-  getByName("testImplementation") {
-    extendsFrom(androidBuildTool)
-  }
-  findByName("integrationTestImplementation")?.run {
-    extendsFrom(androidBuildTool)
-  }
-}
-
 dependencies {
   implementation(projects.tooling.pluginConfig)
   implementation(projects.utilities.buildInfo)
 
-  // use the AGP APIs from the minimum supported AGP version
-  add("androidBuildTool", "com.android.tools.build:gradle:${AGP_VERSION_MINIMUM}")
-
+  // Keep AGP completely out of the plugin-under-test/runtime classpath.
+  // The injected AndroidIDE plugin must be loadable before/independently from the target
+  // project's AGP classloader. The TestKit sample project resolves AGP through its own
+  // com.android.application plugin declaration, which mirrors real AndroidIDE usage.
   testImplementation(gradleTestKit())
   testImplementation(libs.tests.junit.jupiter)
   testImplementation(libs.tests.google.truth)
@@ -99,4 +84,31 @@ tasks.named<Jar>("jar") {
   archiveBaseName.set("androidide-gradle-plugin")
   archiveClassifier.set("") // Removes the default "all" classifier
   archiveVersion.set("")
+}
+
+
+val verifyLogSenderAgpIsolation by tasks.registering {
+  group = "verification"
+  description = "Verifies that the injected LogSender plugin has no static Android Gradle Plugin links."
+  dependsOn(tasks.named("classes"))
+
+  doLast {
+    val classFiles = fileTree(layout.buildDirectory.dir("classes/kotlin/main")) {
+      include("**/LogSenderPlugin*.class")
+    }.files
+
+    check(classFiles.isNotEmpty()) {
+      "No compiled LogSenderPlugin classes were found."
+    }
+
+    val forbiddenPackage = "com/android/build/api/"
+    val offendingFiles = classFiles.filter { classFile ->
+      String(classFile.readBytes(), Charsets.ISO_8859_1).contains(forbiddenPackage)
+    }
+
+    check(offendingFiles.isEmpty()) {
+      "LogSenderPlugin must remain AGP-classloader independent. Static AGP references found in: " +
+        offendingFiles.joinToString { it.name }
+    }
+  }
 }

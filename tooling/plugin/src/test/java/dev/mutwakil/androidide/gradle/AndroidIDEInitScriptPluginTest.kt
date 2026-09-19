@@ -50,7 +50,7 @@ class AndroidIDEInitScriptPluginTest {
   }
 
   private fun assertBasics(result: BuildResult) {
-    // These plugins must be applied to the
+    // These plugins must be applied to the Android app module.
     for ((project, plugins) in mapOf(
       ":app" to arrayOf(AndroidIDEGradlePlugin::class, LogSenderPlugin::class))) {
       for (plugin in plugins) {
@@ -60,24 +60,24 @@ class AndroidIDEInitScriptPluginTest {
       }
     }
 
-    // LogSender should be applied to these
-    for ((project, variants) in mapOf(":app" to arrayOf("demoDebug", "fullDebug"))) {
-      for (variant in variants) {
-        assertThat(result.output).contains(
-          "Adding LogSender dependency (version '${
-            depVersion(true)
-          }') to variant '${variant}' of project '${project}'"
-        )
-      }
-    }
+    // One build-type-scoped bucket covers every product flavor that uses that debuggable build
+    // type (demoDebug, fullDebug, and any future flavor) without depending on AGP variant classes.
+    assertThat(result.output).contains(
+      "Adding LogSender dependency (version '${depVersion(true)}' from Maven) " +
+        "to debuggable build type 'debug' via configuration 'debugRuntimeOnly' " +
+        "of project ':app'"
+    )
 
-    // LogSender should not be applied to these
-    for ((project, variants) in mapOf(":app" to arrayOf("demoRelease", "fullRelease"))) {
-      for (variant in variants) {
-        assertThat(result.output).doesNotContain(
-          "Adding LogSender dependency to variant '${variant}' of project '${project}'"
-        )
-      }
-    }
+    // Release must stay clean.
+    assertThat(result.output).doesNotContain(
+      "to debuggable build type 'release' via configuration 'releaseRuntimeOnly'"
+    )
+
+    // Regression guard for the on-device failure that used to happen while Gradle decorated the
+    // plugin before its apply() method could even run.
+    assertThat(result.output).doesNotContain(
+      "com/android/build/api/variant/ApplicationVariant"
+    )
+    assertThat(result.output).doesNotContain("Could not generate a decorated class for type LogSenderPlugin")
   }
 }

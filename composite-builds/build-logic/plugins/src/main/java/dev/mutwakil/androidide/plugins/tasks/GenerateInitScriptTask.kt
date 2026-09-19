@@ -58,6 +58,11 @@ abstract class GenerateInitScriptTask : DefaultTask() {
 
       it.write(
         """
+      // AndroidIDE Gradle integration fingerprint:
+      // ${mavenGroupId.get()}:${downloadVersion.get()}
+      //
+      // Keep this version in the script itself so a running Gradle daemon cannot reuse the
+      // init-script classloader from an older AndroidIDE APK after an app upgrade.
       initscript {
           repositories {
               

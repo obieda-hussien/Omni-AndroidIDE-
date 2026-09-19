@@ -108,7 +108,7 @@ class NoActivity : Template {
           Log.d("NoActivity", "Project structure created successfully")
 
           // Copy wrapper files (gradlew, gradle folder)
-          copyWrapperFiles(context, projectRoot)
+          TemplateAssets.install(context, ASSETS_BASE_PATH, projectRoot)
 
           // Create version catalog
           val versions = buildList {
@@ -275,14 +275,14 @@ class NoActivity : Template {
           // Create settings.gradle.kts
           val settingsConfig = settingsGradleConfig {
             pluginManagement(
-                if (Options.OPT_USE_GRADLE_KTS) {
+                if (options.useKts) {
                   RepositoryPresets.STANDARD_KTS
                 } else {
                   RepositoryPresets.STANDARD_GROOVY
                 }
             )
             dependencyResolution(
-                if (Options.OPT_USE_GRADLE_KTS) {
+                if (options.useKts) {
                   RepositoryPresets.DEPENDENCY_RESOLUTION_KTS
                 } else {
                   RepositoryPresets.DEPENDENCY_RESOLUTION_GROOVY
@@ -293,7 +293,7 @@ class NoActivity : Template {
           }
           settingsGradleWriter.writeToFile(
               projectRoot,
-              if (Options.OPT_USE_GRADLE_KTS) {
+              if (options.useKts) {
                 SettingsGradleFileType.KTS
               } else {
                 SettingsGradleFileType.GROOVY
@@ -327,7 +327,7 @@ class NoActivity : Template {
             defaultConfig(
                 DefaultConfig(
                     applicationId = packageHelper.getPackageId(),
-                    minSdk = Options.OPT_MIN_SDK,
+                    minSdk = options.minSdk,
                     targetSdk = 36,
                     versionCode = 1,
                     versionName = "1.0",
@@ -358,7 +358,7 @@ class NoActivity : Template {
           proguardRulesWriter.writeToFile(appDir, ProguardRulesPresets.DEFAULT_ANDROID)
 
           // Copy additional resource files from assets
-          copyResourceFiles(context, projectRoot)
+          // Mandatory resources were installed and verified together with the Gradle wrapper.
 
           // Create AndroidManifest.xml
           val manifestContent =
@@ -387,7 +387,7 @@ class NoActivity : Template {
           val stringsContent =
               """
                 <resources>
-                    <string name="app_name">${options.projectName}</string>
+                    <string name="app_name">${TemplateAssets.escapeXml(options.projectName)}</string>
                 </resources>
             """
                   .trimIndent()
@@ -415,7 +415,7 @@ class NoActivity : Template {
             val now = System.currentTimeMillis().toString()
         
             val projectModel = RecentProject(
-                    location = projectRoot!!.path,
+                    location = projectRoot.path,
                     name = options.projectName,
                     createdAt = now,
                     lastModified = now,

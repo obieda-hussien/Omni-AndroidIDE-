@@ -122,6 +122,42 @@ class VersionCatalogWriter : GLCatalog {
       libraries: List<CatalogLibrary>,
       customSections: List<CatalogSection>,
   ): String {
+    // Reject broken catalogs while generating the project, rather than during its first
+    // network-dependent Gradle sync. The version catalog is the source of truth for plugins and
+    // dependencies, including Kotlin and the Kotlin Compose compiler plugin.
+    val versionNames = versions.map { it.name }
+    require(versionNames.size == versionNames.toSet().size) {
+      "Duplicate version aliases in generated catalog"
+    }
+    val pluginAliases = plugins.map { it.alias }
+    require(pluginAliases.size == pluginAliases.toSet().size) {
+      "Duplicate plugin aliases in generated catalog"
+    }
+    val libraryAliases = libraries.map { it.alias }
+    require(libraryAliases.size == libraryAliases.toSet().size) {
+      "Duplicate library aliases in generated catalog"
+    }
+    val availableVersions = versionNames.toSet()
+    plugins.forEach { plugin ->
+      require(plugin.versionRef == null || plugin.versionRef in availableVersions) {
+        "Plugin '${plugin.alias}' references an undefined version '${plugin.versionRef}'"
+      }
+    }
+    libraries.forEach { library ->
+      require(library.versionRef == null || library.versionRef in availableVersions) {
+        "Library '${library.alias}' references an undefined version '${library.versionRef}'"
+      }
+    }
+    val compose = plugins.find { it.id == "org.jetbrains.kotlin.plugin.compose" }
+    val kotlin = plugins.find { it.id == "org.jetbrains.kotlin.android" }
+    if (compose != null) {
+      require(kotlin != null && (compose.versionRef != null || compose.version != null) &&
+        compose.versionRef == kotlin.versionRef &&
+        (compose.versionRef != null || compose.version == kotlin.version)) {
+        "The Kotlin Compose compiler plugin must use the exact Kotlin plugin version"
+      }
+    }
+
     val builder = StringBuilder()
 
     // Generate [versions] section
