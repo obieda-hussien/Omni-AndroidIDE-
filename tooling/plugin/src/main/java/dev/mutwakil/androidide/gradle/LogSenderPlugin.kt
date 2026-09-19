@@ -236,9 +236,13 @@ class LogSenderPlugin : Plugin<Project> {
     }
 
     val version = depVersion(isTestEnv)
-    if (!isTestEnv && version.endsWith("-SNAPSHOT", ignoreCase = true)) {
+    val requiresBundledArtifact =
+      version.endsWith("-SNAPSHOT", ignoreCase = true) ||
+        version.equals("latest.integration", ignoreCase = true)
+
+    if (!isTestEnv && requiresBundledArtifact) {
       logger.warn(
-        "Bundled LogSender is unavailable for internal version '$version'. " +
+        "Bundled LogSender is unavailable for internal/dynamic version '$version'. " +
           "Skipping optional LogSender instrumentation so the user's project can still build."
       )
       return null
