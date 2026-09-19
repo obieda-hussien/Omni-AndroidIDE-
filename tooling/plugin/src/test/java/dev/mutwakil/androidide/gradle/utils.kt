@@ -64,15 +64,15 @@ internal fun buildProject(
 
   configureArgs(args)
 
-  val runner = GradleRunner.create()
-    .withProjectDir(projectRoot.toFile())
-    .withGradleVersion(gradleVersion)
-    .withArguments(
-      *args.toTypedArray()
-    )
+  var testEnvironment: Map<String, String>? = null
 
-  // Gradle 7.x cannot run on JDK 21. Keep compatibility tests honest by running the minimum
-  // supported Gradle line on JDK 17 while the main AndroidIDE build continues to use JDK 21.
+  // Gradle 7.x cannot run on JDK 21. Keep compatibility tests honest by forcing the minimum
+  // supported Gradle line onto JDK 17 from both directions:
+  // 1) JAVA_HOME/PATH for the forked TestKit process, and
+  // 2) org.gradle.java.home for the Gradle daemon itself.
+  //
+  // Setting only JAVA_HOME is insufficient when TestKit can reconnect to/reuse a daemon that was
+  // initially started by the JDK 21 test JVM.
   if (gradleVersion.startsWith("7.")) {
     val java17Home = System.getenv("JAVA_HOME_17_X64")
       ?: System.getenv("JAVA_HOME_17")
@@ -86,13 +86,27 @@ internal fun buildProject(
         "Set JAVA_HOME_17_X64 or ANDROIDIDE_TEST_JAVA17_HOME."
     }
 
-    val testEnvironment = System.getenv().toMutableMap()
-    testEnvironment["JAVA_HOME"] = java17Home
-    testEnvironment["PATH"] = java17Home + File.separator + "bin" +
-      File.pathSeparator + testEnvironment.getOrDefault("PATH", "")
+    args.add("-Dorg.gradle.java.home=$java17Home")
 
-    runner.withEnvironment(testEnvironment)
+    testEnvironment = System.getenv().toMutableMap().apply {
+      this["JAVA_HOME"] = java17Home
+      this["PATH"] = java17Home + File.separator + "bin" +
+        File.pathSeparator + getOrDefault("PATH", "")
+      this["GRADLE_OPTS"] = listOfNotNull(
+        get("GRADLE_OPTS")?.takeIf { it.isNotBlank() },
+        "-Dorg.gradle.java.home=$java17Home"
+      ).joinToString(" ")
+    }
   }
+
+  val runner = GradleRunner.create()
+    .withProjectDir(projectRoot.toFile())
+    .withGradleVersion(gradleVersion)
+    .withArguments(
+      *args.toTypedArray()
+    )
+
+  testEnvironment?.let { runner.withEnvironment(it) }
 
   writeInitScript(
     initScript.toFile(),
