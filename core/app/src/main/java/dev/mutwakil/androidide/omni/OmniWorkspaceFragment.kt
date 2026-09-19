@@ -1,27 +1,34 @@
 package dev.mutwakil.androidide.omni
 
 import android.content.Intent
+import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.FrameLayout
-import android.widget.HorizontalScrollView
+import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.PopupMenu
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
-import com.google.android.material.button.MaterialButton
-import com.google.android.material.button.MaterialButtonToggleGroup
-import com.google.android.material.color.MaterialColors
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.omnilink.sdk.AgentClientMode
 import com.omnilink.sdk.AgentTaskEvent
 import com.omnilink.sdk.AgentTaskRequest
+import dev.mutwakil.androidide.R
 import dev.mutwakil.androidide.activities.editor.EditorHandlerActivity
 import dev.mutwakil.androidide.projects.ProjectManagerImpl
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.UUID
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collect
@@ -29,15 +36,34 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.buildJsonObject
 
 /**
- * Docked Omni workspace shown inside AndroidIDE's END drawer.
+ * OmniDev-styled workspace embedded directly inside AndroidIDE.
  *
- * Workspace remains the model/tool/memory runtime. This fragment is only an IDE-native client UI,
- * so closing it never terminates the durable conversation saved by Omni Dev Workspace.
+ * The fragment intentionally mirrors OmniDev Workspace's chat shell instead of looking like an
+ * IDE utility panel: full header, mode segmented control, message bubbles, live Agent Console,
+ * bottom composer and an overlay chat-history drawer. AndroidIDE remains only the native IDE client;
+ * Workspace still owns the model, tools, MCP, memory, web research and durable remote history.
  */
 class OmniWorkspaceFragment : Fragment() {
 
     companion object {
         private const val WORKSPACE_PACKAGE = "com.omnidev.workspace"
+
+        private val BG = Color.rgb(255, 251, 254)
+        private val SURFACE = Color.WHITE
+        private val PRIMARY = Color.rgb(108, 99, 255)
+        private val PRIMARY_DARK = Color.rgb(74, 66, 212)
+        private val PRIMARY_CONTAINER = Color.rgb(235, 221, 255)
+        private val SEGMENT_BG = Color.rgb(241, 232, 247)
+        private val SECONDARY_CONTAINER = Color.rgb(238, 226, 244)
+        private val TERTIARY = Color.rgb(255, 107, 157)
+        private val ON_SURFACE = Color.rgb(35, 34, 43)
+        private val ON_SURFACE_MUTED = Color.rgb(108, 106, 116)
+        private val OUTLINE = Color.rgb(130, 126, 135)
+        private val TERMINAL = Color.rgb(13, 17, 23)
+        private val TERMINAL_ROW = Color.rgb(20, 25, 33)
+        private val TERMINAL_TEXT = Color.rgb(230, 237, 243)
+        private val SUCCESS = Color.rgb(34, 197, 94)
+        private val ERROR = Color.rgb(239, 68, 68)
     }
 
     private var client: OmniAgentClient? = null
@@ -47,21 +73,33 @@ class OmniWorkspaceFragment : Fragment() {
     private var conversationId: String = ""
     private var projectRoot: String = ""
 
-    private lateinit var historyColumn: LinearLayout
-    private lateinit var transcript: TextView
-    private lateinit var console: TextView
-    private lateinit var transcriptScroll: ScrollView
-    private lateinit var consoleScroll: ScrollView
+    private var selectedMode: AgentClientMode = AgentClientMode.CHAT
+    private var localTranscript: String = ""
+    private var localConsole: String = ""
+    private var streamedAssistant: StringBuilder? = null
+    private var activeAssistantView: TextView? = null
+
+    private lateinit var rootFrame: FrameLayout
+    private lateinit var messagesColumn: LinearLayout
+    private lateinit var messagesScroll: ScrollView
+    private lateinit var emptyState: LinearLayout
     private lateinit var status: TextView
     private lateinit var prompt: EditText
-    private lateinit var send: MaterialButton
-    private lateinit var stop: MaterialButton
-    private lateinit var chatSurfaceButton: MaterialButton
-    private lateinit var consoleSurfaceButton: MaterialButton
-    private lateinit var modeGroup: MaterialButtonToggleGroup
-    private lateinit var chatModeButton: MaterialButton
-    private lateinit var agentModeButton: MaterialButton
-    private lateinit var teamModeButton: MaterialButton
+    private lateinit var sendButton: TextView
+    private lateinit var modeChat: TextView
+    private lateinit var modeAgent: TextView
+    private lateinit var modeTeam: TextView
+
+    private lateinit var historyScrim: View
+    private lateinit var historyPanel: LinearLayout
+    private lateinit var historyList: LinearLayout
+    private lateinit var historyCount: TextView
+    private lateinit var historySearch: EditText
+
+    private var liveConsoleCard: LinearLayout? = null
+    private var liveConsoleHeader: TextView? = null
+    private var liveConsoleBody: TextView? = null
+    private var liveConsoleEvents: Int = 0
 
     override fun onCreateView(
         inflater: android.view.LayoutInflater,
@@ -69,221 +107,110 @@ class OmniWorkspaceFragment : Fragment() {
         savedInstanceState: Bundle?
     ): View {
         val activity = requireActivity() as EditorHandlerActivity
-        val context = requireContext()
         projectRoot = ProjectManagerImpl.getInstance().projectDirPath
-        client = OmniAgentClient(context)
-        conversations = OmniConversationStore(context)
+        client = OmniAgentClient(requireContext())
+        conversations = OmniConversationStore(requireContext())
         conversationId = conversations!!.current(projectRoot)
 
-        val root = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setBackgroundColor(
-                MaterialColors.getColor(this, com.google.android.material.R.attr.colorSurface)
-            )
+        rootFrame = FrameLayout(requireContext()).apply {
+            setBackgroundColor(BG)
         }
 
-        val historyPane = LinearLayout(context).apply {
+        val main = LinearLayout(requireContext()).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(6.dp(), 10.dp(), 6.dp(), 10.dp())
-            layoutParams = LinearLayout.LayoutParams(108.dp(), ViewGroup.LayoutParams.MATCH_PARENT)
-            setBackgroundColor(
-                MaterialColors.getColor(
-                    this,
-                    com.google.android.material.R.attr.colorSurfaceContainer
-                )
-            )
+            setBackgroundColor(BG)
+            setPadding(18.dp(), 10.dp(), 18.dp(), 10.dp())
         }
-        historyPane.addView(TextView(context).apply {
-            text = "Chats"
-            textSize = 15f
-            setTypeface(typeface, Typeface.BOLD)
-            setPadding(6.dp(), 0, 0, 6.dp())
-        })
-        historyPane.addView(MaterialButton(context).apply {
-            text = "+ New"
-            textSize = 11f
-            isAllCaps = false
-            setOnClickListener { newConversation() }
-        })
-        val historyScroll = ScrollView(context)
-        historyColumn = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-        historyScroll.addView(historyColumn)
-        historyPane.addView(
-            historyScroll,
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
+        rootFrame.addView(
+            main,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
         )
 
-        val main = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(10.dp(), 10.dp(), 10.dp(), 10.dp())
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
-        }
+        main.addView(buildHeader(activity))
+        main.addView(buildModeSwitcher())
 
-        val header = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        header.addView(TextView(context).apply {
-            text = "Omni"
-            textSize = 20f
-            setTypeface(typeface, Typeface.BOLD)
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        })
-        header.addView(MaterialButton(context).apply {
-            text = "Split"
-            textSize = 10f
-            isAllCaps = false
-            setOnClickListener { openWorkspaceAdjacent() }
-        })
-        header.addView(MaterialButton(context).apply {
-            text = "×"
-            textSize = 20f
-            minWidth = 40.dp()
-            isAllCaps = false
-            setOnClickListener { activity.closeOmniWorkspace() }
-        })
-        main.addView(header)
-
-        main.addView(TextView(context).apply {
-            text = projectRoot.substringAfterLast('/').ifBlank { "No project" }
+        status = TextView(requireContext()).apply {
             textSize = 11f
-            alpha = 0.72f
-        })
-
-        modeGroup = MaterialButtonToggleGroup(context).apply {
-            isSingleSelection = true
-            isSelectionRequired = true
-        }
-        chatModeButton = modeButton("Chat")
-        agentModeButton = modeButton("Agent")
-        teamModeButton = modeButton("Team")
-        modeGroup.addView(chatModeButton)
-        modeGroup.addView(agentModeButton)
-        modeGroup.addView(teamModeButton)
-        modeGroup.check(agentModeButton.id)
-        main.addView(modeGroup)
-
-        val surfaceGroup = MaterialButtonToggleGroup(context).apply {
-            isSingleSelection = true
-            isSelectionRequired = true
-        }
-        chatSurfaceButton = modeButton("Chat")
-        consoleSurfaceButton = modeButton("Console")
-        surfaceGroup.addView(chatSurfaceButton)
-        surfaceGroup.addView(consoleSurfaceButton)
-        surfaceGroup.check(chatSurfaceButton.id)
-        main.addView(surfaceGroup)
-
-        status = TextView(context).apply {
-            text = "Ready • Workspace tools, MCP, web, Git, logs and IDE diagnostics connected"
-            textSize = 11f
-            setPadding(0, 6.dp(), 0, 6.dp())
+            setTextColor(ON_SURFACE_MUTED)
+            gravity = Gravity.CENTER
+            visibility = View.GONE
+            setPadding(8.dp(), 5.dp(), 8.dp(), 4.dp())
         }
         main.addView(status)
 
-        val surfaces = FrameLayout(context).apply {
+        val contentFrame = FrameLayout(requireContext()).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 0,
                 1f
             )
         }
-        transcript = TextView(context).apply {
-            textSize = 13f
-            setTextIsSelectable(true)
-            setPadding(8.dp(), 8.dp(), 8.dp(), 8.dp())
+
+        messagesColumn = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 12.dp(), 0, 18.dp())
         }
-        transcriptScroll = ScrollView(context).apply { addView(transcript) }
-        console = TextView(context).apply {
-            textSize = 11f
-            typeface = Typeface.MONOSPACE
-            setTextIsSelectable(true)
-            setPadding(8.dp(), 8.dp(), 8.dp(), 8.dp())
+        messagesScroll = ScrollView(requireContext()).apply {
+            isFillViewport = true
+            clipToPadding = false
+            addView(
+                messagesColumn,
+                ScrollView.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            )
         }
-        consoleScroll = ScrollView(context).apply {
-            addView(console)
+        contentFrame.addView(
+            messagesScroll,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        )
+
+        emptyState = buildEmptyState()
+        contentFrame.addView(
+            emptyState,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        )
+        main.addView(contentFrame)
+
+        main.addView(buildComposer())
+
+        historyScrim = View(requireContext()).apply {
+            setBackgroundColor(Color.argb(55, 0, 0, 0))
             visibility = View.GONE
+            setOnClickListener { hideHistory() }
         }
-        surfaces.addView(
-            transcriptScroll,
+        rootFrame.addView(
+            historyScrim,
             FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
         )
-        surfaces.addView(
-            consoleScroll,
+
+        historyPanel = buildHistoryPanel()
+        val panelWidth = (resources.displayMetrics.widthPixels * 0.86f).toInt()
+            .coerceAtLeast(280.dp())
+        rootFrame.addView(
+            historyPanel,
             FrameLayout.LayoutParams(
+                panelWidth,
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
+                Gravity.END
             )
         )
-        main.addView(surfaces)
 
-        surfaceGroup.addOnButtonCheckedListener { _, checkedId, isChecked ->
-            if (!isChecked) return@addOnButtonCheckedListener
-            val showConsole = checkedId == consoleSurfaceButton.id
-            transcriptScroll.visibility = if (showConsole) View.GONE else View.VISIBLE
-            consoleScroll.visibility = if (showConsole) View.VISIBLE else View.GONE
-        }
-
-        val quickScroll = HorizontalScrollView(context)
-        val quickRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
-        quickScroll.addView(quickRow)
-        addQuickAction(quickRow, "Explain") {
-            setPrompt("Explain the current file in depth and how it fits into this project.")
-        }
-        addQuickAction(quickRow, "Fix build") {
-            setPrompt(
-                "Inspect the latest AndroidIDE build output and diagnostics, fix the root cause, " +
-                    "then build and test through native IDE capabilities until verified."
-            )
-        }
-        addQuickAction(quickRow, "Diagnostics") {
-            setPrompt(
-                "Inspect AndroidIDE project diagnostics, active-file LSP diagnostics, IDE logs and " +
-                    "recent build output. Explain the root causes and fix actionable project issues."
-            )
-        }
-        addQuickAction(quickRow, "Git") {
-            setPrompt(
-                "Inspect the current native Git status and diff. Summarize changes and flag risks. " +
-                    "Do not stage, commit, checkout, merge, pull or push without my approval."
-            )
-        }
-        main.addView(quickScroll)
-
-        prompt = EditText(context).apply {
-            hint = "Ask Omni about code, logs, build, Git, diagnostics…"
-            minLines = 2
-            maxLines = 5
-        }
-        main.addView(prompt)
-
-        val actions = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.END
-        }
-        stop = MaterialButton(context).apply {
-            text = "Stop"
-            isAllCaps = false
-            isEnabled = false
-            setOnClickListener { stopTask() }
-        }
-        send = MaterialButton(context).apply {
-            text = "Send"
-            isAllCaps = false
-            setOnClickListener { sendPrompt() }
-        }
-        actions.addView(stop)
-        actions.addView(send)
-        main.addView(actions)
-
-        root.addView(historyPane)
-        root.addView(main)
-        refreshHistory()
         loadConversation(conversationId)
-        return root
+        return rootFrame
     }
 
     override fun onDestroyView() {
@@ -294,34 +221,349 @@ class OmniWorkspaceFragment : Fragment() {
         super.onDestroyView()
     }
 
+    private fun buildHeader(activity: EditorHandlerActivity): View {
+        val header = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 4.dp(), 0, 12.dp())
+        }
+
+        header.addView(iconButton("⚙", "Workspace options") {
+            showWorkspaceMenu(it, activity)
+        })
+
+        val titleBlock = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        titleBlock.addView(TextView(requireContext()).apply {
+            text = "OmniDev Workspace"
+            textSize = 20f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(ON_SURFACE)
+            gravity = Gravity.CENTER
+        })
+        titleBlock.addView(TextView(requireContext()).apply {
+            text = "AndroidIDE • Workspace Connected ⚡"
+            textSize = 12f
+            setTextColor(TERTIARY)
+            gravity = Gravity.CENTER
+            setTypeface(typeface, Typeface.BOLD)
+        })
+        header.addView(titleBlock)
+
+        header.addView(iconButton("↶", "Chat history") {
+            showHistory()
+        })
+        return header
+    }
+
+    private fun buildModeSwitcher(): View {
+        val shell = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            background = rounded(SEGMENT_BG, 18f)
+            setPadding(2.dp(), 2.dp(), 2.dp(), 2.dp())
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                50.dp()
+            ).apply {
+                bottomMargin = 8.dp()
+            }
+        }
+
+        modeTeam = segment("Team Agents", AgentClientMode.TEAM)
+        modeAgent = segment("Agent", AgentClientMode.AGENT)
+        modeChat = segment("Chat", AgentClientMode.CHAT)
+        shell.addView(modeTeam)
+        shell.addView(modeAgent)
+        shell.addView(modeChat)
+        updateModeVisuals()
+        return shell
+    }
+
+    private fun segment(label: String, mode: AgentClientMode): TextView =
+        TextView(requireContext()).apply {
+            text = label
+            textSize = 14f
+            gravity = Gravity.CENTER
+            setTextColor(ON_SURFACE)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
+            setOnClickListener {
+                if (currentTaskId != null) return@setOnClickListener
+                selectedMode = mode
+                updateModeVisuals()
+            }
+        }
+
+    private fun updateModeVisuals() {
+        if (!::modeChat.isInitialized) return
+        listOf(
+            modeTeam to AgentClientMode.TEAM,
+            modeAgent to AgentClientMode.AGENT,
+            modeChat to AgentClientMode.CHAT
+        ).forEach { (view, mode) ->
+            val selected = selectedMode == mode
+            view.background = if (selected) rounded(PRIMARY_CONTAINER, 16f) else null
+            view.setTextColor(if (selected) Color.rgb(48, 27, 78) else ON_SURFACE_MUTED)
+            view.setTypeface(view.typeface, if (selected) Typeface.BOLD else Typeface.NORMAL)
+        }
+    }
+
+    private fun buildEmptyState(): LinearLayout =
+        LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(28.dp(), 40.dp(), 28.dp(), 80.dp())
+
+            addView(ImageView(requireContext()).apply {
+                setImageResource(R.drawable.ic_omni_agent)
+                setColorFilter(Color.rgb(189, 178, 255))
+                layoutParams = LinearLayout.LayoutParams(92.dp(), 92.dp()).apply {
+                    bottomMargin = 18.dp()
+                }
+            })
+            addView(TextView(requireContext()).apply {
+                text = "OmniDev Workspace"
+                textSize = 28f
+                setTypeface(typeface, Typeface.BOLD)
+                setTextColor(Color.rgb(104, 101, 112))
+                gravity = Gravity.CENTER
+            })
+            addView(TextView(requireContext()).apply {
+                text = "Set a Target Context and start coding with AI"
+                textSize = 15f
+                setTextColor(Color.rgb(164, 160, 168))
+                gravity = Gravity.CENTER
+                setPadding(0, 8.dp(), 0, 0)
+            })
+        }
+
+    private fun buildComposer(): View {
+        val row = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 8.dp(), 0, 2.dp())
+        }
+
+        sendButton = TextView(requireContext()).apply {
+            text = "➤"
+            textSize = 27f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            background = circle(PRIMARY)
+            setOnClickListener {
+                if (currentTaskId != null) stopTask() else sendPrompt()
+            }
+        }
+        row.addView(
+            sendButton,
+            LinearLayout.LayoutParams(56.dp(), 56.dp()).apply {
+                marginEnd = 10.dp()
+            }
+        )
+
+        val inputShell = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = roundedWithStroke(SURFACE, 28f, OUTLINE, 1)
+            setPadding(14.dp(), 2.dp(), 8.dp(), 2.dp())
+        }
+        prompt = EditText(requireContext()).apply {
+            hint = "…Ask OmniDev anything"
+            textSize = 16f
+            minLines = 1
+            maxLines = 4
+            setTextColor(ON_SURFACE)
+            setHintTextColor(Color.rgb(103, 100, 108))
+            background = null
+            setPadding(0, 4.dp(), 0, 4.dp())
+        }
+        inputShell.addView(
+            prompt,
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        )
+        inputShell.addView(TextView(requireContext()).apply {
+            text = "📎"
+            textSize = 23f
+            gravity = Gravity.CENTER
+            setTextColor(ON_SURFACE)
+            setOnClickListener {
+                showStatus("Current editor file is already included in Omni context.")
+            }
+        }, LinearLayout.LayoutParams(42.dp(), 48.dp()))
+
+        row.addView(
+            inputShell,
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        )
+
+        row.addView(TextView(requireContext()).apply {
+            text = "+"
+            textSize = 32f
+            gravity = Gravity.CENTER
+            setTextColor(PRIMARY)
+            setOnClickListener { showQuickActions(it) }
+        }, LinearLayout.LayoutParams(48.dp(), 56.dp()))
+
+        return row
+    }
+
+    private fun buildHistoryPanel(): LinearLayout {
+        val panel = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.rgb(249, 248, 253))
+            visibility = View.GONE
+            elevation = 18f
+        }
+
+        val top = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(10.dp(), 12.dp(), 10.dp(), 12.dp())
+            setBackgroundColor(Color.rgb(244, 241, 252))
+        }
+        top.addView(iconButton("×", "Close history") { hideHistory() })
+        top.addView(iconButton("+", "New conversation") {
+            newConversation()
+            hideHistory()
+        })
+
+        val historyTitle = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.END
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            setPadding(6.dp(), 0, 8.dp(), 0)
+        }
+        historyTitle.addView(TextView(requireContext()).apply {
+            text = "Chat history"
+            textSize = 20f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(ON_SURFACE)
+            gravity = Gravity.END
+        })
+        historyCount = TextView(requireContext()).apply {
+            textSize = 11f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(ON_SURFACE_MUTED)
+            gravity = Gravity.END
+        }
+        historyTitle.addView(historyCount)
+        top.addView(historyTitle)
+        top.addView(TextView(requireContext()).apply {
+            text = "↶"
+            textSize = 25f
+            gravity = Gravity.CENTER
+            setTextColor(PRIMARY_DARK)
+            background = circle(PRIMARY_CONTAINER)
+        }, LinearLayout.LayoutParams(46.dp(), 46.dp()))
+        panel.addView(top)
+
+        historySearch = EditText(requireContext()).apply {
+            hint = "Search chats"
+            textSize = 17f
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            setSingleLine(true)
+            setTextColor(ON_SURFACE)
+            setHintTextColor(ON_SURFACE_MUTED)
+            background = roundedWithStroke(Color.TRANSPARENT, 18f, OUTLINE, 1)
+            setPadding(16.dp(), 0, 16.dp(), 0)
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    refreshHistory()
+                }
+                override fun afterTextChanged(s: Editable?) = Unit
+            })
+        }
+        panel.addView(
+            historySearch,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                58.dp()
+            ).apply {
+                setMargins(14.dp(), 14.dp(), 14.dp(), 8.dp())
+            }
+        )
+
+        val filters = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(14.dp(), 2.dp(), 14.dp(), 6.dp())
+        }
+        filters.addView(TextView(requireContext()).apply {
+            text = "⋮"
+            textSize = 27f
+            setTextColor(ON_SURFACE)
+            gravity = Gravity.CENTER
+        }, LinearLayout.LayoutParams(40.dp(), 44.dp()))
+        filters.addView(historyFilter("Select"))
+        filters.addView(historyFilter("Recent"))
+        filters.addView(historyFilter("All chats", true))
+        panel.addView(filters)
+
+        panel.addView(View(requireContext()).apply {
+            setBackgroundColor(Color.rgb(215, 211, 220))
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1.dp()).apply {
+            setMargins(14.dp(), 0, 14.dp(), 0)
+        })
+
+        historyList = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(8.dp(), 6.dp(), 8.dp(), 18.dp())
+        }
+        panel.addView(
+            ScrollView(requireContext()).apply { addView(historyList) },
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1f
+            )
+        )
+        return panel
+    }
+
+    private fun historyFilter(label: String, selected: Boolean = false): TextView =
+        TextView(requireContext()).apply {
+            text = label
+            textSize = 13f
+            gravity = Gravity.CENTER
+            setTextColor(PRIMARY)
+            setTypeface(typeface, Typeface.BOLD)
+            if (selected) background = rounded(Color.argb(22, 108, 99, 255), 12f)
+            layoutParams = LinearLayout.LayoutParams(0, 40.dp(), 1f)
+        }
+
     private fun sendPrompt() {
         val userText = prompt.text?.toString()?.trim().orEmpty()
         if (userText.isBlank() || currentTaskId != null || projectRoot.isBlank()) return
 
         val store = conversations ?: return
         val activeClient = client ?: return
-        val mode = when (modeGroup.checkedButtonId) {
-            chatModeButton.id -> AgentClientMode.CHAT
-            teamModeButton.id -> AgentClientMode.TEAM
-            else -> AgentClientMode.AGENT
-        }
-
         val taskId = "androidide-task-" + UUID.randomUUID()
         currentTaskId = taskId
-        send.isEnabled = false
-        stop.isEnabled = true
-        status.text = "Collecting live AndroidIDE context…"
-        appendChat("\n\nYou: $userText\n\nOmni: ")
+        updateSendState(true)
+        showStatus("Collecting live AndroidIDE context…")
+
+        emptyState.visibility = View.GONE
+        addUserBubble(userText)
+        beginLiveConsole()
+        activeAssistantView = addAssistantBubble("")
+        streamedAssistant = StringBuilder()
+
+        localTranscript += "\n\nYou: $userText\n\nOmni: "
         prompt.text?.clear()
-        store.saveTranscript(projectRoot, conversationId, transcript.text.toString())
+        store.saveTranscript(projectRoot, conversationId, localTranscript)
         refreshHistory()
 
         runningJob = lifecycleScope.launch {
             val contextJson = runCatching { OmniIdeStateBridge.collectContext() }
                 .getOrElse {
-                    status.text = "Context error: " + (it.message ?: "unknown")
+                    showStatus("Context error: " + (it.message ?: "unknown"))
                     buildJsonObject {}
                 }
+
             val needsTitle = store.needsTitle(conversationId)
             val title = if (needsTitle) topic(userText) else null
             val request = AgentTaskRequest(
@@ -331,7 +573,7 @@ class OmniWorkspaceFragment : Fragment() {
                 appDisplayName = "Omni AndroidIDE",
                 prompt = userText,
                 scopePath = projectRoot,
-                mode = mode,
+                mode = selectedMode,
                 context = contextJson
             )
             if (needsTitle && title != null) store.setTitle(projectRoot, conversationId, title)
@@ -341,54 +583,75 @@ class OmniWorkspaceFragment : Fragment() {
 
             fun persistLocal(force: Boolean = false) {
                 val now = System.currentTimeMillis()
-                if (!force && now - lastLocalCheckpoint < 700L) return
+                if (!force && now - lastLocalCheckpoint < 650L) return
                 lastLocalCheckpoint = now
-                store.saveTranscript(projectRoot, conversationId, transcript.text.toString())
-                store.saveConsole(projectRoot, conversationId, console.text.toString())
+                store.saveTranscript(projectRoot, conversationId, localTranscript)
+                store.saveConsole(projectRoot, conversationId, localConsole)
             }
 
             try {
                 activeClient.runTask(request).collect { event ->
                     when (event) {
                         is AgentTaskEvent.Started -> {
-                            status.text = "Running • saved in Workspace as “${event.conversationTitle}”"
+                            showStatus("Running • saved in Workspace as “${event.conversationTitle}”")
                             store.setTitle(projectRoot, conversationId, event.conversationTitle)
                             refreshHistory()
                         }
                         is AgentTaskEvent.Status -> {
-                            status.text = event.label + (event.detail?.let { " • $it" } ?: "")
-                            appendConsole(
+                            showStatus(
+                                event.label + (event.detail?.let { " • $it" } ?: "")
+                            )
+                            appendConsoleLine(
                                 "[STATUS] ${event.label}" +
-                                    (event.detail?.let { " • $it" } ?: "") + "\n"
+                                    (event.detail?.let { " • $it" } ?: "")
                             )
                         }
                         is AgentTaskEvent.StreamChunk -> {
                             streamed = true
-                            appendChat(event.delta)
+                            streamedAssistant?.append(event.delta)
+                            localTranscript += event.delta
+                            activeAssistantView?.text = streamedAssistant.toString()
+                            scrollMessagesToBottom()
                         }
                         is AgentTaskEvent.Console -> {
                             val marker = if (event.isError) "ERROR" else event.kind.uppercase()
-                            appendConsole(
-                                "[$marker] ${event.name ?: event.kind}: ${event.summary}\n" +
-                                    (event.detail?.let { it.take(6_000) + "\n" } ?: "")
+                            appendConsoleLine(
+                                "[$marker] ${event.name ?: event.kind}: ${event.summary}"
                             )
+                            event.detail?.takeIf { it.isNotBlank() }?.let {
+                                appendConsoleLine(it.take(3_500))
+                            }
                         }
                         is AgentTaskEvent.FinalAnswer -> {
-                            if (!streamed) appendChat(event.content)
-                            appendChat("\n")
-                            status.text = "Completed • Workspace history + Agent Console saved"
+                            if (!streamed) {
+                                streamedAssistant?.append(event.content)
+                                localTranscript += event.content
+                                activeAssistantView?.text = event.content
+                            } else if (event.content.isNotBlank()) {
+                                activeAssistantView?.text = event.content
+                            }
+                            localTranscript += "\n"
+                            finishLiveConsole(true)
+                            showStatus("Completed • history and Agent Console saved in Workspace")
                         }
                         is AgentTaskEvent.Error -> {
-                            appendChat("\n⚠ ${event.message}\n")
-                            appendConsole("[ERROR/${event.code}] ${event.message}\n")
-                            status.text = "Failed: ${event.code}"
+                            val message = "⚠ ${event.message}"
+                            if (streamedAssistant.isNullOrEmpty()) {
+                                streamedAssistant?.append(message)
+                                localTranscript += message
+                                activeAssistantView?.text = message
+                            }
+                            appendConsoleLine("[ERROR/${event.code}] ${event.message}")
+                            finishLiveConsole(false)
+                            showStatus("Failed: ${event.code}")
                         }
                         is AgentTaskEvent.Cancelled -> {
-                            appendChat("\n[Cancelled]\n")
-                            appendConsole("[CANCELLED] $taskId\n")
-                            status.text = "Cancelled"
+                            appendConsoleLine("[CANCELLED] $taskId")
+                            finishLiveConsole(false)
+                            showStatus("Cancelled")
                         }
                     }
+
                     persistLocal(
                         force = event is AgentTaskEvent.FinalAnswer ||
                             event is AgentTaskEvent.Error ||
@@ -396,13 +659,17 @@ class OmniWorkspaceFragment : Fragment() {
                     )
                 }
             } catch (error: Exception) {
-                appendChat("\n⚠ ${error.message ?: "Omni connection failed"}\n")
-                appendConsole("[CONNECTION ERROR] ${error.stackTraceToString().take(6_000)}\n")
-                status.text = "Connection failed"
+                val message = error.message ?: "Omni connection failed"
+                if (streamedAssistant.isNullOrEmpty()) {
+                    activeAssistantView?.text = "⚠ $message"
+                    localTranscript += "⚠ $message"
+                }
+                appendConsoleLine("[CONNECTION ERROR] $message")
+                finishLiveConsole(false)
+                showStatus("Connection failed")
             } finally {
                 currentTaskId = null
-                stop.isEnabled = false
-                send.isEnabled = true
+                updateSendState(false)
                 persistLocal(force = true)
                 refreshHistory()
             }
@@ -415,19 +682,29 @@ class OmniWorkspaceFragment : Fragment() {
             runCatching { client?.cancel(taskId) }
             runningJob?.cancel()
             currentTaskId = null
-            stop.isEnabled = false
-            send.isEnabled = true
-            status.text = "Stopped"
+            appendConsoleLine("[CANCELLED] $taskId")
+            finishLiveConsole(false)
+            updateSendState(false)
+            showStatus("Stopped")
         }
     }
 
+    private fun updateSendState(running: Boolean) {
+        sendButton.text = if (running) "■" else "➤"
+        sendButton.background = circle(if (running) ERROR else PRIMARY)
+    }
+
     private fun newConversation() {
-        if (currentTaskId != null) return
+        if (currentTaskId != null) {
+            showStatus("Stop the current task before starting a new conversation.")
+            return
+        }
         val store = conversations ?: return
         conversationId = store.newConversation(projectRoot)
-        transcript.text = ""
-        console.text = ""
-        status.text = "New Omni conversation"
+        localTranscript = ""
+        localConsole = ""
+        clearMessages()
+        showStatus("New Omni conversation")
         refreshHistory()
     }
 
@@ -436,27 +713,458 @@ class OmniWorkspaceFragment : Fragment() {
         val store = conversations ?: return
         conversationId = id
         store.select(projectRoot, id)
-        transcript.text = store.transcript(id)
-        console.text = store.console(id)
-        status.text = store.title(id)
+        localTranscript = store.transcript(id)
+        localConsole = store.console(id)
+        clearMessages()
+        renderTranscript(localTranscript)
+        if (localConsole.isNotBlank()) {
+            val card = createConsoleCard(localConsole, true)
+            messagesColumn.addView(card)
+        }
+        emptyState.visibility =
+            if (messagesColumn.childCount == 0) View.VISIBLE else View.GONE
+        showStatus(store.title(id))
         refreshHistory()
-        transcriptScroll.post { transcriptScroll.fullScroll(View.FOCUS_DOWN) }
+        scrollMessagesToBottom()
+    }
+
+    private fun clearMessages() {
+        messagesColumn.removeAllViews()
+        liveConsoleCard = null
+        liveConsoleHeader = null
+        liveConsoleBody = null
+        activeAssistantView = null
+        streamedAssistant = null
+        liveConsoleEvents = 0
+        emptyState.visibility = View.VISIBLE
+    }
+
+    private fun renderTranscript(raw: String) {
+        if (raw.isBlank()) return
+
+        val marker = Regex("(?m)(?:^|\\n\\n)(You|Omni): ")
+        val matches = marker.findAll(raw).toList()
+        if (matches.isEmpty()) {
+            addAssistantBubble(raw.trim())
+            return
+        }
+
+        matches.forEachIndexed { index, match ->
+            val role = match.groupValues[1]
+            val start = match.range.last + 1
+            val end = if (index + 1 < matches.size) matches[index + 1].range.first else raw.length
+            val body = raw.substring(start, end).trim()
+            if (body.isBlank()) return@forEachIndexed
+            if (role == "You") addUserBubble(body) else addAssistantBubble(body)
+        }
+    }
+
+    private fun addUserBubble(text: String) {
+        emptyState.visibility = View.GONE
+        val row = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.TOP
+            setPadding(0, 4.dp(), 0, 8.dp())
+        }
+
+        row.addView(TextView(requireContext()).apply {
+            text = "●"
+            textSize = 22f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            background = circle(TERTIARY)
+        }, LinearLayout.LayoutParams(44.dp(), 44.dp()).apply {
+            marginEnd = 10.dp()
+        })
+
+        row.addView(TextView(requireContext()).apply {
+            this.text = text
+            textSize = 15f
+            setTextColor(ON_SURFACE)
+            setTextIsSelectable(true)
+            background = rounded(PRIMARY_CONTAINER, 16f)
+            setPadding(15.dp(), 11.dp(), 15.dp(), 11.dp())
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+
+        messagesColumn.addView(row)
+        scrollMessagesToBottom()
+    }
+
+    private fun addAssistantBubble(text: String): TextView {
+        emptyState.visibility = View.GONE
+        val row = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.TOP
+            setPadding(0, 4.dp(), 0, 8.dp())
+        }
+
+        val body = TextView(requireContext()).apply {
+            this.text = text
+            textSize = 15f
+            setTextColor(ON_SURFACE)
+            setTextIsSelectable(true)
+            background = rounded(SECONDARY_CONTAINER, 14f)
+            setPadding(15.dp(), 11.dp(), 15.dp(), 11.dp())
+        }
+        row.addView(
+            body,
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginEnd = 10.dp()
+            }
+        )
+        row.addView(TextView(requireContext()).apply {
+            text = "🤖"
+            textSize = 21f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            background = circle(PRIMARY)
+        }, LinearLayout.LayoutParams(44.dp(), 44.dp()))
+
+        messagesColumn.addView(row)
+        scrollMessagesToBottom()
+        return body
+    }
+
+    private fun beginLiveConsole() {
+        localConsole = ""
+        liveConsoleEvents = 0
+        liveConsoleCard = createConsoleCard("", false)
+        liveConsoleCard?.let { messagesColumn.addView(it) }
+        scrollMessagesToBottom()
+    }
+
+    private fun createConsoleCard(initial: String, done: Boolean): LinearLayout {
+        val card = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.VERTICAL
+            background = rounded(TERMINAL, 14f)
+            setPadding(0, 0, 0, 10.dp())
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = 6.dp()
+                bottomMargin = 10.dp()
+            }
+        }
+
+        val headerRow = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(14.dp(), 10.dp(), 14.dp(), 10.dp())
+            setBackgroundColor(TERMINAL_ROW)
+        }
+        val state = TextView(requireContext()).apply {
+            text = if (done) "DONE" else "LIVE"
+            textSize = 11f
+            setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
+            setTextColor(if (done) SUCCESS else Color.rgb(88, 166, 255))
+        }
+        headerRow.addView(state)
+        headerRow.addView(TextView(requireContext()).apply {
+            text = "  Agent Console <>"
+            textSize = 16f
+            setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
+            setTextColor(SUCCESS)
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        val count = TextView(requireContext()).apply {
+            text = if (done) "" else "events 0"
+            textSize = 10f
+            setTypeface(Typeface.MONOSPACE)
+            setTextColor(Color.rgb(139, 148, 158))
+        }
+        headerRow.addView(count)
+        card.addView(headerRow)
+
+        val body = TextView(requireContext()).apply {
+            text = initial.takeLast(60_000)
+            textSize = 11f
+            setTypeface(Typeface.MONOSPACE)
+            setTextColor(TERMINAL_TEXT)
+            setTextIsSelectable(true)
+            setPadding(14.dp(), 12.dp(), 14.dp(), 2.dp())
+        }
+        card.addView(body)
+
+        if (!done) {
+            liveConsoleHeader = count
+            liveConsoleBody = body
+        }
+        return card
+    }
+
+    private fun appendConsoleLine(line: String) {
+        if (line.isBlank()) return
+        liveConsoleEvents += 1
+        localConsole = (localConsole + line.trimEnd() + "\n").takeLast(80_000)
+        liveConsoleBody?.text = localConsole.takeLast(60_000)
+        liveConsoleHeader?.text = "events $liveConsoleEvents"
+        scrollMessagesToBottom()
+    }
+
+    private fun finishLiveConsole(success: Boolean) {
+        liveConsoleHeader?.text = if (success) "DONE • events $liveConsoleEvents" else "STOP • events $liveConsoleEvents"
+        liveConsoleHeader?.setTextColor(if (success) SUCCESS else ERROR)
     }
 
     private fun refreshHistory() {
-        if (!::historyColumn.isInitialized) return
+        if (!::historyList.isInitialized) return
         val store = conversations ?: return
-        historyColumn.removeAllViews()
-        store.list(projectRoot).forEach { item ->
-            historyColumn.addView(MaterialButton(requireContext()).apply {
-                text = item.title.take(28)
-                textSize = 10f
-                maxLines = 2
-                isAllCaps = false
-                alpha = if (item.id == conversationId) 1f else 0.72f
-                setOnClickListener { loadConversation(item.id) }
+        val query = if (::historySearch.isInitialized) historySearch.text?.toString()?.trim().orEmpty() else ""
+        val all = store.list(projectRoot)
+        val visible = if (query.isBlank()) all else {
+            all.filter { it.title.contains(query, ignoreCase = true) }
+        }
+
+        historyCount.text = "conversations ${all.size}"
+        historyList.removeAllViews()
+
+        var lastSection: String? = null
+        visible.forEach { item ->
+            val section = historySection(item.updatedAt)
+            if (section != lastSection) {
+                lastSection = section
+                historyList.addView(TextView(requireContext()).apply {
+                    text = section
+                    textSize = 11f
+                    setTypeface(typeface, Typeface.BOLD)
+                    setTextColor(ON_SURFACE_MUTED)
+                    setPadding(8.dp(), 14.dp(), 8.dp(), 5.dp())
+                })
+            }
+            historyList.addView(historyRow(item))
+        }
+
+        if (visible.isEmpty()) {
+            historyList.addView(TextView(requireContext()).apply {
+                text = if (query.isBlank()) "No conversations yet" else "No conversations found"
+                textSize = 14f
+                setTextColor(ON_SURFACE_MUTED)
+                gravity = Gravity.CENTER
+                setPadding(16.dp(), 44.dp(), 16.dp(), 44.dp())
             })
         }
+    }
+
+    private fun historyRow(item: OmniConversationStore.ConversationSummary): View {
+        val row = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = if (item.id == conversationId) {
+                rounded(Color.rgb(232, 216, 248), 14f)
+            } else {
+                rounded(Color.TRANSPARENT, 14f)
+            }
+            setPadding(8.dp(), 7.dp(), 4.dp(), 7.dp())
+            setOnClickListener {
+                loadConversation(item.id)
+                hideHistory()
+            }
+        }
+
+        row.addView(TextView(requireContext()).apply {
+            text = "🔌"
+            textSize = 16f
+            gravity = Gravity.CENTER
+            background = rounded(Color.rgb(239, 231, 244), 10f)
+        }, LinearLayout.LayoutParams(38.dp(), 38.dp()).apply {
+            marginEnd = 8.dp()
+        })
+
+        val textBlock = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        textBlock.addView(TextView(requireContext()).apply {
+            text = item.title
+            textSize = 14f
+            maxLines = 1
+            setTextColor(ON_SURFACE)
+            if (item.id == conversationId) setTypeface(typeface, Typeface.BOLD)
+        })
+        textBlock.addView(TextView(requireContext()).apply {
+            text = "AndroidIDE • ${relativeTime(item.updatedAt)}"
+            textSize = 10f
+            setTextColor(ON_SURFACE_MUTED)
+        })
+        row.addView(textBlock, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+
+        if (item.id == conversationId) {
+            row.addView(TextView(requireContext()).apply {
+                text = "Current"
+                textSize = 9f
+                gravity = Gravity.CENTER
+                setTextColor(Color.WHITE)
+                background = rounded(PRIMARY, 8f)
+                setPadding(6.dp(), 2.dp(), 6.dp(), 2.dp())
+            })
+        }
+
+        row.addView(TextView(requireContext()).apply {
+            text = "⋮"
+            textSize = 22f
+            gravity = Gravity.CENTER
+            setTextColor(ON_SURFACE)
+            setOnClickListener { anchor ->
+                showConversationMenu(anchor, item)
+            }
+        }, LinearLayout.LayoutParams(38.dp(), 38.dp()))
+
+        return row
+    }
+
+    private fun showConversationMenu(
+        anchor: View,
+        item: OmniConversationStore.ConversationSummary
+    ) {
+        PopupMenu(requireContext(), anchor).apply {
+            menu.add("Rename")
+            menu.add("Delete")
+            setOnMenuItemClickListener { selected ->
+                when (selected.title.toString()) {
+                    "Rename" -> renameConversation(item)
+                    "Delete" -> deleteConversation(item)
+                }
+                true
+            }
+            show()
+        }
+    }
+
+    private fun renameConversation(item: OmniConversationStore.ConversationSummary) {
+        val input = EditText(requireContext()).apply {
+            setText(item.title)
+            setSelection(text.length)
+            setSingleLine(true)
+        }
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle("Rename conversation")
+            .setView(input)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Rename") { _, _ ->
+                conversations?.setTitle(
+                    projectRoot,
+                    item.id,
+                    input.text?.toString().orEmpty()
+                )
+                refreshHistory()
+            }
+            .show()
+    }
+
+    private fun deleteConversation(item: OmniConversationStore.ConversationSummary) {
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle("Delete conversation?")
+            .setMessage(item.title)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Delete") { _, _ ->
+                conversations?.remove(projectRoot, item.id)
+                if (item.id == conversationId) {
+                    conversationId = conversations?.current(projectRoot).orEmpty()
+                    if (conversationId.isBlank()) {
+                        conversationId = conversations?.newConversation(projectRoot).orEmpty()
+                    }
+                    loadConversation(conversationId)
+                }
+                refreshHistory()
+            }
+            .show()
+    }
+
+    private fun showHistory() {
+        refreshHistory()
+        historyScrim.visibility = View.VISIBLE
+        historyPanel.visibility = View.VISIBLE
+        historyPanel.alpha = 0f
+        historyPanel.translationX = 48.dp().toFloat()
+        historyPanel.animate()
+            .alpha(1f)
+            .translationX(0f)
+            .setDuration(180L)
+            .start()
+    }
+
+    private fun hideHistory() {
+        if (!::historyPanel.isInitialized || historyPanel.visibility != View.VISIBLE) return
+        historyPanel.animate()
+            .alpha(0f)
+            .translationX(48.dp().toFloat())
+            .setDuration(150L)
+            .withEndAction {
+                historyPanel.visibility = View.GONE
+                historyScrim.visibility = View.GONE
+                historyPanel.alpha = 1f
+                historyPanel.translationX = 0f
+            }
+            .start()
+    }
+
+    private fun showWorkspaceMenu(anchor: View, activity: EditorHandlerActivity) {
+        PopupMenu(requireContext(), anchor).apply {
+            menu.add("Open Workspace app")
+            menu.add("Open side-by-side")
+            menu.add("Refresh IDE context")
+            menu.add("Close Omni panel")
+            setOnMenuItemClickListener { item ->
+                when (item.title.toString()) {
+                    "Open Workspace app" -> openWorkspace(false)
+                    "Open side-by-side" -> openWorkspace(true)
+                    "Refresh IDE context" -> showStatus("IDE context refreshes automatically on every send.")
+                    "Close Omni panel" -> activity.closeOmniWorkspace()
+                }
+                true
+            }
+            show()
+        }
+    }
+
+    private fun showQuickActions(anchor: View) {
+        PopupMenu(requireContext(), anchor).apply {
+            menu.add("Explain current file")
+            menu.add("Fix current build")
+            menu.add("Inspect diagnostics & logs")
+            menu.add("Inspect Git status & diff")
+            menu.add("Open Workspace side-by-side")
+            setOnMenuItemClickListener { item ->
+                when (item.title.toString()) {
+                    "Explain current file" -> setPrompt(
+                        "Explain the current file in depth: responsibility, important flows, " +
+                            "dependencies, risks, and how it fits into the whole project."
+                    )
+                    "Fix current build" -> setPrompt(
+                        "Inspect the latest AndroidIDE build output and diagnostics, fix the root " +
+                            "cause, then build and test through native IDE capabilities until verified."
+                    )
+                    "Inspect diagnostics & logs" -> setPrompt(
+                        "Inspect AndroidIDE project diagnostics, IDE logs, app logs and recent build " +
+                            "output. Explain root causes and fix actionable project issues."
+                    )
+                    "Inspect Git status & diff" -> setPrompt(
+                        "Inspect the current native Git status and diff. Summarize changes, flag risks, " +
+                            "and do not stage, commit, merge, pull or push without my approval."
+                    )
+                    "Open Workspace side-by-side" -> openWorkspace(true)
+                }
+                true
+            }
+            show()
+        }
+    }
+
+    private fun openWorkspace(adjacent: Boolean) {
+        val context = requireContext()
+        val launch = context.packageManager.getLaunchIntentForPackage(WORKSPACE_PACKAGE)
+        if (launch == null) {
+            showStatus("Omni Dev Workspace is not installed.")
+            return
+        }
+        val intent = Intent(launch).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (adjacent) {
+                addFlags(Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
+                addFlags(Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT)
+            }
+        }
+        runCatching { startActivity(intent) }
+            .onFailure { showStatus("Could not open Workspace: " + (it.message ?: "unknown")) }
     }
 
     private fun setPrompt(value: String) {
@@ -465,59 +1173,55 @@ class OmniWorkspaceFragment : Fragment() {
         prompt.requestFocus()
     }
 
-    private fun appendChat(value: String) {
-        transcript.append(value)
-        transcriptScroll.post { transcriptScroll.fullScroll(View.FOCUS_DOWN) }
+    private fun showStatus(value: String) {
+        status.text = value
+        status.visibility = View.VISIBLE
     }
 
-    private fun appendConsole(value: String) {
-        val merged = (console.text.toString() + value).takeLast(80_000)
-        console.text = merged
-        consoleScroll.post { consoleScroll.fullScroll(View.FOCUS_DOWN) }
+    private fun scrollMessagesToBottom() {
+        messagesScroll.post { messagesScroll.fullScroll(View.FOCUS_DOWN) }
     }
 
-    private fun modeButton(label: String) =
-        MaterialButton(requireContext()).apply {
-            id = View.generateViewId()
-            text = label
-            textSize = 11f
-            isAllCaps = false
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+    private fun iconButton(
+        glyph: String,
+        description: String,
+        onClick: (View) -> Unit
+    ): TextView =
+        TextView(requireContext()).apply {
+            text = glyph
+            contentDescription = description
+            textSize = 27f
+            gravity = Gravity.CENTER
+            setTextColor(ON_SURFACE)
+            setOnClickListener(onClick)
+            layoutParams = LinearLayout.LayoutParams(50.dp(), 50.dp())
         }
 
-    private fun addQuickAction(row: LinearLayout, label: String, action: () -> Unit) {
-        row.addView(MaterialButton(requireContext()).apply {
-            text = label
-            textSize = 10f
-            isAllCaps = false
-            setOnClickListener { action() }
-        })
+    private fun historySection(timestamp: Long): String {
+        val now = System.currentTimeMillis()
+        val diff = (now - timestamp).coerceAtLeast(0L)
+        val day = 86_400_000L
+        return when {
+            diff < day -> "Today"
+            diff < 2 * day -> "Yesterday"
+            diff < 7 * day -> "Previous 7 days"
+            else -> SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(Date(timestamp))
+        }
     }
 
-    private fun openWorkspaceAdjacent() {
-        val context = requireContext()
-        val launch = context.packageManager.getLaunchIntentForPackage(WORKSPACE_PACKAGE)
-        if (launch == null) {
-            status.text = "Omni Dev Workspace is not installed"
-            return
+    private fun relativeTime(timestamp: Long): String {
+        val diff = (System.currentTimeMillis() - timestamp).coerceAtLeast(0L)
+        val minute = 60_000L
+        val hour = 60 * minute
+        val day = 24 * hour
+        return when {
+            diff < minute -> "Just now"
+            diff < hour -> "${diff / minute}m ago"
+            diff < day -> "${diff / hour}h ago"
+            diff < 2 * day -> "Yesterday"
+            diff < 7 * day -> "${diff / day}d ago"
+            else -> SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(timestamp))
         }
-
-        val adjacent = Intent(launch).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            addFlags(Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
-            addFlags(Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT)
-        }
-        runCatching { startActivity(adjacent) }
-            .onFailure {
-                runCatching {
-                    startActivity(
-                        Intent(launch).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    )
-                }.onFailure { fallbackError ->
-                    status.text = "Could not open Workspace: " +
-                        (fallbackError.message ?: fallbackError.javaClass.simpleName)
-                }
-            }
     }
 
     private fun topic(value: String): String =
@@ -527,6 +1231,29 @@ class OmniWorkspaceFragment : Fragment() {
             ?.replace(Regex("\\s+"), " ")
             ?.take(72)
             ?: "AndroidIDE conversation"
+
+    private fun rounded(color: Int, radiusDp: Float): GradientDrawable =
+        GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            setColor(color)
+            cornerRadius = radiusDp * resources.displayMetrics.density
+        }
+
+    private fun roundedWithStroke(
+        color: Int,
+        radiusDp: Float,
+        strokeColor: Int,
+        strokeDp: Int
+    ): GradientDrawable =
+        rounded(color, radiusDp).apply {
+            setStroke(strokeDp.dp(), strokeColor)
+        }
+
+    private fun circle(color: Int): GradientDrawable =
+        GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(color)
+        }
 
     private fun Int.dp(): Int =
         (this * resources.displayMetrics.density).toInt()
