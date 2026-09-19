@@ -28,7 +28,6 @@ import org.gradle.api.invocation.Gradle
 import org.gradle.api.logging.Logging
 import java.io.File
 import java.io.FileNotFoundException
-import java.net.URI
 
 /**
  * Plugin for the AndroidIDE's Gradle Init Script.
@@ -116,13 +115,7 @@ class AndroidIDEInitScriptPlugin : Plugin<Gradle> {
     mavenLocalRepos: String
   ) {
 
-    if (!isMavenLocalEnabled) {
-
-      // For AndroidIDE CI builds
-      maven { repository ->
-        repository.url = URI.create(BuildInfo.SNAPSHOTS_REPOSITORY)
-      }
-    } else {
+    if (isMavenLocalEnabled) {
       logger.info("Using local maven repository for classpath resolution...")
 
       for (mavenLocalRepo in mavenLocalRepos.split(':')) {
@@ -143,14 +136,17 @@ class AndroidIDEInitScriptPlugin : Plugin<Gradle> {
       }
     }
 
-    // for AGP API dependency
+    // Resolve normal Android/project dependencies from their canonical repositories first.
+    // The AndroidIDE plugin itself is loaded directly from the init-script classloader, so user
+    // builds no longer need the AndroidIDE snapshots repository injected ahead of every lookup.
     google()
+    mavenCentral()
+    gradlePluginPortal()
 
+    // Keep AndroidIDE's public repository as a final fallback for released IDE artifacts such as
+    // LogSender, without penalizing every ordinary dependency lookup.
     maven { repository ->
       repository.setUrl(BuildInfo.PUBLIC_REPOSITORY)
     }
-
-    mavenCentral()
-    gradlePluginPortal()
   }
 }
