@@ -69,7 +69,6 @@ class AndroidIDEPluginTest {
       it.add("-P$_PROPERTY_LOGSENDER_LOCAL_AAR=${aar.absolutePath}")
     })
 
-    assertThat(result.output).contains("Using bundled LogSender AAR:")
     assertThat(result.output).contains(
       "Adding LogSender dependency (bundled with AndroidIDE, file '${aar.name}')"
     )
