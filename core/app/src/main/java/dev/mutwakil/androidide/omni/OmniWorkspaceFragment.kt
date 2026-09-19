@@ -952,7 +952,9 @@ class OmniWorkspaceFragment : Fragment() {
 
         if (conversationId != id) return
         currentTaskId = cursor.taskId
-        store.saveRunCursor(id, cursor.taskId, snapshot.lastSequence)
+        // Keep the client-observed sequence. snapshot.lastSequence is the server's head and
+        // advancing the cursor to it here would skip exactly the events replay is meant to recover.
+        store.saveRunCursor(id, cursor.taskId, cursor.lastSequence)
         updateSendState(true)
         beginLiveConsole()
         showStatus("Live • reconnecting to running Workspace task…")
