@@ -34,6 +34,7 @@ internal fun buildProject(
   agpVersion: String = BuildInfo.AGP_VERSION_LATEST,
   gradleVersion: String = BuildInfo.AGP_VERSION_GRADLE_LATEST,
   useApplyPluginGroovySyntax: Boolean = false,
+  pluginTestEnv: Boolean = true,
   configureArgs: (MutableList<String>) -> Unit = {},
   vararg plugins: String
 ): BuildResult {
@@ -57,10 +58,14 @@ internal fun buildProject(
   val args = mutableListOf(
     ":app:tasks", // run any task, as long as it applies the plugins
     "--init-script", initScript.pathString,
-    "-P$_PROPERTY_IS_TEST_ENV=true", // plugins should be published to maven local first
-    "-P$_PROPERTY_MAVEN_LOCAL_REPOSITORY=$repositories",
     "--stacktrace"
   )
+
+  if (pluginTestEnv) {
+    // Plugins should use artifacts staged in build-local Maven repositories for integration tests.
+    args.add("-P$_PROPERTY_IS_TEST_ENV=true")
+    args.add("-P$_PROPERTY_MAVEN_LOCAL_REPOSITORY=$repositories")
+  }
 
   configureArgs(args)
 
