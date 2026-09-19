@@ -296,7 +296,13 @@ class OmniConversationStore(context: Context) {
     data class ConversationSummary(
         val id: String,
         val title: String,
-        val updatedAt: Long
+        val updatedAt: Long,
+        val status: String? = null
+    )
+
+    data class RunCursor(
+        val taskId: String,
+        val lastSequence: Long
     )
 
     companion object {
@@ -381,6 +387,34 @@ class OmniConversationStore(context: Context) {
     fun console(conversationId: String): String =
         prefs.getString(consoleKey(conversationId), "").orEmpty()
 
+    fun runCursor(conversationId: String): RunCursor? {
+        val taskId = prefs.getString(activeTaskKey(conversationId), null)
+            ?.takeIf { it.isNotBlank() }
+            ?: return null
+        return RunCursor(
+            taskId = taskId,
+            lastSequence = prefs.getLong(lastSequenceKey(conversationId), 0L)
+        )
+    }
+
+    fun saveRunCursor(
+        conversationId: String,
+        taskId: String,
+        lastSequence: Long
+    ) {
+        prefs.edit()
+            .putString(activeTaskKey(conversationId), taskId)
+            .putLong(lastSequenceKey(conversationId), lastSequence.coerceAtLeast(0L))
+            .apply()
+    }
+
+    fun clearRunCursor(conversationId: String) {
+        prefs.edit()
+            .remove(activeTaskKey(conversationId))
+            .remove(lastSequenceKey(conversationId))
+            .apply()
+    }
+
     fun saveConsole(projectRoot: String, conversationId: String, text: String) {
         val bounded = text.takeLast(MAX_CONSOLE_CHARS)
         prefs.edit()
@@ -413,6 +447,8 @@ class OmniConversationStore(context: Context) {
             .remove(updatedKey(conversationId))
             .remove(transcriptKey(conversationId))
             .remove(consoleKey(conversationId))
+            .remove(activeTaskKey(conversationId))
+            .remove(lastSequenceKey(conversationId))
 
         if (current == conversationId) {
             editor.remove(projectKey(projectRoot))
@@ -467,4 +503,6 @@ class OmniConversationStore(context: Context) {
     private fun updatedKey(conversationId: String): String = "updated_$conversationId"
     private fun transcriptKey(conversationId: String): String = "transcript_$conversationId"
     private fun consoleKey(conversationId: String): String = "console_$conversationId"
+    private fun activeTaskKey(conversationId: String): String = "active_task_$conversationId"
+    private fun lastSequenceKey(conversationId: String): String = "last_sequence_$conversationId"
 }
