@@ -182,8 +182,8 @@ jobs:
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
-      - name: Verify injected Gradle plugin isolation and run tooling API tests
-        run: ./gradlew :tooling:plugin:verifyLogSenderAgpIsolation :tooling:impl:build --continue
+      - name: Verify injected Gradle plugin and run tooling API tests
+        run: ./gradlew :tooling:plugin:verifyLogSenderAgpIsolation :tooling:plugin:test :tooling:impl:build --continue
         env:
           ANDROIDIDE_TEST: true
           TEST_TOOLING_API_IMPL: true
