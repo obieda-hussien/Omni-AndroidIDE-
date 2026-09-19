@@ -164,9 +164,22 @@ class OmniAgentClient(private val context: Context) {
             return@callbackFlow
         }
 
+        var taskBinder: IBinder? = null
+        var deathRecipient: IBinder.DeathRecipient? = null
         try {
             val negotiated = negotiate()
-            connect().startAgentTask(
+            val service = connect()
+            val binder = service.asBinder()
+            val recipient = IBinder.DeathRecipient {
+                remote = null
+                negotiation = null
+                close(IllegalStateException("Omni Agent Gateway binder died during the live task"))
+            }
+            binder.linkToDeath(recipient, 0)
+            taskBinder = binder
+            deathRecipient = recipient
+
+            service.startAgentTask(
                 negotiated.protocolVersion,
                 requestJson,
                 callback
@@ -184,7 +197,13 @@ class OmniAgentClient(private val context: Context) {
             close()
         }
 
-        awaitClose { }
+        awaitClose {
+            val binder = taskBinder
+            val recipient = deathRecipient
+            if (binder != null && recipient != null) {
+                runCatching { binder.unlinkToDeath(recipient, 0) }
+            }
+        }
     }
 
     suspend fun cancel(taskId: String) {
