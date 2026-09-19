@@ -71,6 +71,29 @@ internal fun buildProject(
       *args.toTypedArray()
     )
 
+  // Gradle 7.x cannot run on JDK 21. Keep compatibility tests honest by running the minimum
+  // supported Gradle line on JDK 17 while the main AndroidIDE build continues to use JDK 21.
+  if (gradleVersion.startsWith("7.")) {
+    val java17Home = System.getenv("JAVA_HOME_17_X64")
+      ?: System.getenv("JAVA_HOME_17")
+      ?: System.getenv("ANDROIDIDE_TEST_JAVA17_HOME")
+      ?: System.getProperty("java.home").takeIf {
+        Runtime.version().feature() <= 17
+      }
+
+    require(!java17Home.isNullOrBlank()) {
+      "Gradle $gradleVersion compatibility tests require JDK 17. " +
+        "Set JAVA_HOME_17_X64 or ANDROIDIDE_TEST_JAVA17_HOME."
+    }
+
+    val testEnvironment = System.getenv().toMutableMap()
+    testEnvironment["JAVA_HOME"] = java17Home
+    testEnvironment["PATH"] = java17Home + File.separator + "bin" +
+      File.pathSeparator + testEnvironment.getOrDefault("PATH", "")
+
+    runner.withEnvironment(testEnvironment)
+  }
+
   writeInitScript(
     initScript.toFile(),
     PluginUnderTestMetadataReading.readImplementationClasspath()
