@@ -30,8 +30,8 @@ internal object OmniIdeCallerPolicy {
         if (!sameSigner || !capability.startsWith("ide.")) return false
         return when (packageName) {
             ADMIN -> true
-            "$"+"{BASE}.pro", "$"+"{BASE}.oem" -> capability in read || capability in build
-            "$"+"{BASE}.norm" -> capability in status || capability in setOf(
+            BASE + ".pro", BASE + ".oem" -> capability in read || capability in build
+            BASE + ".norm" -> capability in status || capability in setOf(
                 "ide.read_lines", "ide.search_text", "ide.git_status"
             )
             BASE -> capability in setOf("ide.health", "ide.get_project_context")
