@@ -1142,13 +1142,67 @@ class OmniWorkspaceFragment : Fragment() {
     private fun refreshHistory() {
         if (!::historyList.isInitialized) return
         val store = conversations ?: return
-        val query = if (::historySearch.isInitialized) historySearch.text?.toString()?.trim().orEmpty() else ""
-        val all = store.list(projectRoot)
-        val visible = if (query.isBlank()) all else {
+        val query = if (::historySearch.isInitialized) {
+            historySearch.text?.toString()?.trim().orEmpty()
+        } else {
+            ""
+        }
+
+        // Render the local cache immediately, then replace it with canonical Workspace history.
+        renderHistoryItems(store.list(projectRoot), query)
+
+        historyRefreshJob?.cancel()
+        historyRefreshJob = lifecycleScope.launch {
+            delay(120L)
+            val activeClient = client ?: return@launch
+            val result = runCatching {
+                activeClient.listConversations(
+                    AgentConversationQuery(
+                        limit = 100,
+                        search = query.takeIf { it.isNotBlank() }
+                    )
+                )
+            }.getOrNull() ?: return@launch
+
+            val latestQuery = if (::historySearch.isInitialized) {
+                historySearch.text?.toString()?.trim().orEmpty()
+            } else {
+                ""
+            }
+            if (latestQuery != query || !isAdded) return@launch
+
+            val remoteItems = result.conversations.map { remote ->
+                OmniConversationStore.ConversationSummary(
+                    id = remote.clientConversationId,
+                    title = remote.title,
+                    updatedAt = remote.lastUpdated,
+                    status = remote.status
+                )
+            }
+
+            // An empty unsent local chat has no Workspace row yet. Keep only that temporary row.
+            val pendingLocal = store.list(projectRoot).firstOrNull { item ->
+                item.id == conversationId &&
+                    item.id !in remoteItems.map { it.id }.toSet() &&
+                    store.transcript(item.id).isBlank()
+            }
+            val merged = if (pendingLocal != null) listOf(pendingLocal) + remoteItems else remoteItems
+            renderHistoryItems(merged, query)
+        }
+    }
+
+    private fun renderHistoryItems(
+        all: List<OmniConversationStore.ConversationSummary>,
+        query: String
+    ) {
+        if (!::historyList.isInitialized) return
+        val visible = if (query.isBlank()) {
+            all
+        } else {
             all.filter { it.title.contains(query, ignoreCase = true) }
         }
 
-        historyCount.text = "conversations ${all.size}"
+        historyCount.text = "conversations " + all.size
         historyList.removeAllViews()
 
         var lastSection: String? = null
@@ -1214,7 +1268,8 @@ class OmniWorkspaceFragment : Fragment() {
             if (item.id == conversationId) setTypeface(typeface, Typeface.BOLD)
         })
         textBlock.addView(TextView(requireContext()).apply {
-            text = "AndroidIDE • ${relativeTime(item.updatedAt)}"
+            text = "AndroidIDE • " + relativeTime(item.updatedAt) +
+                (item.status?.takeIf { it.isNotBlank() }?.let { " • " + it } ?: "")
             textSize = 10f
             setTextColor(ON_SURFACE_MUTED)
         })
@@ -1249,12 +1304,17 @@ class OmniWorkspaceFragment : Fragment() {
         item: OmniConversationStore.ConversationSummary
     ) {
         PopupMenu(requireContext(), anchor).apply {
-            menu.add("Rename")
-            menu.add("Delete")
+            menu.add("Open in Workspace")
+            menu.add("Refresh from Workspace")
             setOnMenuItemClickListener { selected ->
                 when (selected.title.toString()) {
-                    "Rename" -> renameConversation(item)
-                    "Delete" -> deleteConversation(item)
+                    "Open in Workspace" -> openWorkspace(false)
+                    "Refresh from Workspace" -> {
+                        lifecycleScope.launch {
+                            runCatching { syncConversationFromWorkspace(item.id) }
+                            refreshHistory()
+                        }
+                    }
                 }
                 true
             }
