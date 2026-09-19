@@ -104,7 +104,10 @@ class OmniIdeExtensionService : ExtensionService() {
 
     override val accessController: AccessController = object : AccessController {
         override fun decide(caller: CallerContext, request: ActionRequest): AccessDecision =
-            AccessDecision.ALLOW
+            if (OmniIdeCallerPolicy.allowed(
+                    caller.callingPackage, caller.sameSignerAsHost, request.name
+                )
+            ) AccessDecision.ALLOW else AccessDecision.DENY
     }
 
     override val auditLogger: AuditLogger = object : AuditLogger {
