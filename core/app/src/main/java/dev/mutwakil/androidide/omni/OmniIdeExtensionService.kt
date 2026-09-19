@@ -126,6 +126,7 @@ class OmniIdeExtensionService : ExtensionService() {
         capability("ide.get_active_document", "Current editor file, content, dirty state and revision.", CapabilityExecutionMode.IMMEDIATE),
         capability("ide.get_file_info", "Payload: {path}. File metadata, line count, dirty state and SHA-256 revision.", CapabilityExecutionMode.ASYNC),
         capability("ide.read_file", "Payload: {path}. Read a bounded project file snapshot with a SHA-256 revision.", CapabilityExecutionMode.ASYNC),
+        capability("ide.export_payload", "Admin only. Stream a large project file to Workspace through a short-lived, read-only Content URI; returns metadata and SHA-256, not file bytes.", CapabilityExecutionMode.ASYNC, requiresConfirmation = true),
         capability("ide.read_lines", "Payload: {path,start_line,end_line,include_line_numbers?}. Read an exact 1-based line range without transporting the whole file.", CapabilityExecutionMode.ASYNC),
         capability("ide.preview_line_patch", "Payload: {path,expected_revision?,hunks:[{start_line,end_line,replacement}]}. Compute a bounded diff-like preview and next revision without writing.", CapabilityExecutionMode.ASYNC),
         capability("ide.write_file", "Payload: {path,content,expected_revision?}. Revision-safe whole-file replacement; prefer line patches for focused edits.", CapabilityExecutionMode.ASYNC, destructive = true),
@@ -320,6 +321,13 @@ class OmniIdeExtensionService : ExtensionService() {
                 "ide.git_abort_merge" -> success(OmniIdeWorkspaceBridge.gitAbortMerge())
                 "ide.read_file" -> success(
                     OmniIdeStateBridge.readFile(payload.requiredString("path"))
+                )
+                "ide.export_payload" -> success(
+                    OmniIdeLargePayload.export(
+                        context = applicationContext,
+                        path = payload.requiredString("path"),
+                        recipientPackage = caller.callingPackage
+                    )
                 )
                 "ide.write_file" -> success(
                     OmniIdeStateBridge.writeFile(
