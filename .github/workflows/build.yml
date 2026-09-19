@@ -156,8 +156,8 @@ jobs:
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
-      - name: Compile injected Gradle plugin and run tooling API tests
-        run: ./gradlew :tooling:plugin:compileKotlin :tooling:impl:build --continue
+      - name: Test injected Gradle plugin classloading and run tooling API tests
+        run: ./gradlew :tooling:plugin:test --tests dev.mutwakil.androidide.gradle.LogSenderClassloadingTest :tooling:impl:build --continue
         env:
           ANDROIDIDE_TEST: true
           TEST_TOOLING_API_IMPL: true
