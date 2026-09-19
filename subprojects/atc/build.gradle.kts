@@ -26,7 +26,7 @@ plugins {
 android {
     namespace = "${BuildConfig.PACKAGE_NAME}.atc"
     
-    defaultConfig { minSdk = 21 }
+    defaultConfig { minSdk = 23 }
     
     buildFeatures {
         buildConfig = false
@@ -40,4 +40,6 @@ dependencies {
 
     implementation(libs.common.datastore)
     implementation(libs.common.kotlin.coroutines.android)
+
+    testImplementation("junit:junit:4.13.2")
 }

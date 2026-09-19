@@ -81,6 +81,9 @@ class ComposeEmptyActivity : Template {
           val sdkHelper = SdkVersionHelper.getInstance(context)
           sdkHelper.setAllSdkVersionsBlocking(options.minSdk, 36, 36)
 
+          require(options.languageType == LanguageType.KOTLIN) {
+            "Compose projects require Kotlin. Select Kotlin in the project wizard."
+          }
           val projectRoot = File(options.saveLocation, options.projectName)
           Log.d("ComposeEmptyActivity", "Project root: ${projectRoot.absolutePath}")
 
@@ -88,9 +91,7 @@ class ComposeEmptyActivity : Template {
 
           // Create project structure (no layout needed for Compose)
           projectLang =
-              if (options.languageType == LanguageType.KOTLIN)
-                  dev.mutwakil.androidide.project.manager.builder.ProjectType.KOTLIN
-              else dev.mutwakil.androidide.project.manager.builder.ProjectType.JAVA
+              dev.mutwakil.androidide.project.manager.builder.ProjectType.KOTLIN
           val structResult =
               projectStructBuilder.buildProjectStructure(
                   moduleName = "app",
@@ -102,14 +103,16 @@ class ComposeEmptyActivity : Template {
 
           if (!structResult.success) {
             Log.e("ComposeEmptyActivity", "Structure creation failed: ${structResult.message}")
-            listener?.onTemplateCreated(false, structResult.message)
+            withContext(Dispatchers.Main) {
+              listener?.onTemplateCreated(false, structResult.message)
+            }
             return@withContext
           }
 
           Log.d("ComposeEmptyActivity", "Project structure created successfully")
 
           // Copy wrapper files (gradlew, gradle folder)
-          copyWrapperFiles(context, projectRoot)
+          TemplateAssets.install(context, ASSETS_BASE_PATH, projectRoot)
 
           // Create version catalog
           val versions =
@@ -253,12 +256,16 @@ class ComposeEmptyActivity : Template {
 
           // Create settings.gradle.kts
           val settingsConfig = settingsGradleConfig {
-            pluginManagement(RepositoryPresets.STANDARD_KTS)
-            dependencyResolution(RepositoryPresets.DEPENDENCY_RESOLUTION_KTS)
+            pluginManagement(if (options.useKts) RepositoryPresets.STANDARD_KTS else RepositoryPresets.STANDARD_GROOVY)
+            dependencyResolution(if (options.useKts) RepositoryPresets.DEPENDENCY_RESOLUTION_KTS else RepositoryPresets.DEPENDENCY_RESOLUTION_GROOVY)
             rootProjectName(options.projectName)
             include(":app")
           }
-          settingsGradleWriter.writeToFile(projectRoot, SettingsGradleFileType.KTS, settingsConfig)
+          settingsGradleWriter.writeToFile(
+              projectRoot,
+              if (options.useKts) SettingsGradleFileType.KTS else SettingsGradleFileType.GROOVY,
+              settingsConfig,
+          )
 
           // Create gradle.properties
           gradlePropertiesWriter.writeToFile(projectRoot, GradlePropertiesPresets.STANDARD_ANDROID)
@@ -288,7 +295,7 @@ class ComposeEmptyActivity : Template {
             defaultConfig(
                 DefaultConfig(
                     applicationId = packageHelper.getPackageId(),
-                    minSdk = Options.OPT_MIN_SDK,
+                    minSdk = options.minSdk,
                     targetSdk = 36,
                     versionCode = 1,
                     versionName = "1.0",
@@ -398,7 +405,7 @@ class ComposeEmptyActivity : Template {
           createComposeTheme(projectRoot, packageHelper.getPackageId())
 
           // Copy additional resource files from assets
-          copyResourceFiles(context, projectRoot)
+          // Mandatory resources were installed and verified together with the Gradle wrapper.
 
           // Create AndroidManifest.xml (without package attribute)
           val manifestContent =
@@ -436,7 +443,7 @@ class ComposeEmptyActivity : Template {
           val stringsContent =
               """
                 <resources>
-                    <string name="app_name">${options.projectName}</string>
+                    <string name="app_name">${TemplateAssets.escapeXml(options.projectName)}</string>
                 </resources>
             """
                   .trimIndent()
@@ -468,14 +475,10 @@ class ComposeEmptyActivity : Template {
           Log.d("ComposeEmptyActivity", "Project created successfully")
 
           withContext(Dispatchers.Main) {
-            listener?.onTemplateCreated(
-                true,
-                "Compose Empty Activity project created successfully at ${projectRoot.absolutePath}",
-            )
-            val now = System.currentTimeMillis().toString()
+val now = System.currentTimeMillis().toString()
         
             val projectModel = RecentProject(
-                    location = projectRoot!!.path,
+                    location = projectRoot.path,
                     name = options.projectName,
                     createdAt = now,
                     lastModified = now,
@@ -496,7 +499,7 @@ class ComposeEmptyActivity : Template {
   /** Create Compose theme files (Color.kt, Type.kt, Theme.kt) */
   private fun createComposeTheme(projectRoot: File, packageId: String) {
     val themeDir =
-        File(projectRoot, "app/src/main/$projectLang/${packageId.replace('.', '/')}/ui/theme")
+        File(projectRoot, "app/src/main/kotlin/${packageId.replace('.', '/')}/ui/theme")
     themeDir.mkdirs()
 
     // Color.kt

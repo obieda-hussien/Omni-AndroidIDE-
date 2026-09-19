@@ -317,24 +317,11 @@ class MLGradleWriter : IMLGradleWriter {
     builder.appendLine("        targetCompatibility JavaVersion.${config.javaVersion.versionName}")
     builder.appendLine("    }")
 
-    // Kotlin options
-    if (config.enableKotlinOptions) {
-      builder.appendLine("    kotlin {")
-      builder.appendLine("        compilerOptions {")
-      builder.appendLine(
-          "            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.${config.javaVersion.toJvmName()})"
-      )
-      builder.appendLine("        }")
-      builder.appendLine("    }")
-    }
 
-    // Compose options
-    if (config.enableCompose && config.composeCompilerVersion != null) {
-      builder.appendLine("    composeOptions {")
-      builder.appendLine(
-          "        kotlinCompilerExtensionVersion = '${config.composeCompilerVersion}'"
-      )
-      builder.appendLine("    }")
+
+    // Kotlin 2.x's Compose compiler is supplied by the Kotlin Compose Gradle plugin.
+    // Never emit the obsolete Compose 1.x compiler extension coordinate.
+    if (config.enableCompose) {
       builder.appendLine("    packaging {")
       builder.appendLine("        resources {")
       builder.appendLine("            excludes += '/META-INF/{AL2.0,LGPL2.1}'")
@@ -343,6 +330,18 @@ class MLGradleWriter : IMLGradleWriter {
     }
 
     builder.appendLine("}")
+
+    // The Kotlin Gradle extension is a project-level extension, not nested inside android {}.
+    if (config.enableKotlinOptions) {
+      builder.appendLine()
+      builder.appendLine("kotlin {")
+      builder.appendLine("    compilerOptions {")
+      builder.appendLine(
+          "        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.fromTarget(\"${config.javaVersion.versionNumber}\"))"
+      )
+      builder.appendLine("    }")
+      builder.appendLine("}")
+    }
 
     // Dependencies
     if (config.dependencies.isNotEmpty()) {
@@ -466,24 +465,10 @@ class MLGradleWriter : IMLGradleWriter {
     )
     builder.appendLine("    }")
 
-    // Kotlin compiler options
-    if (config.enableKotlinOptions) {
-      builder.appendLine("    kotlin {")
-      builder.appendLine("        compilerOptions {")
-      builder.appendLine(
-          "            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.fromTarget(\"${config.javaVersion.versionNumber}\"))"
-      )
-      builder.appendLine("        }")
-      builder.appendLine("    }")
-    }
 
-    // Compose options
-    if (config.enableCompose && config.composeCompilerVersion != null) {
-      builder.appendLine("    composeOptions {")
-      builder.appendLine(
-          "        kotlinCompilerExtensionVersion = \"${config.composeCompilerVersion}\""
-      )
-      builder.appendLine("    }")
+
+    // Kotlin 2.x's Compose compiler is supplied by the Kotlin Compose Gradle plugin.
+    if (config.enableCompose) {
       builder.appendLine("    packaging {")
       builder.appendLine("        resources {")
       builder.appendLine("            excludes += \"/META-INF/{AL2.0,LGPL2.1}\"")
@@ -492,6 +477,18 @@ class MLGradleWriter : IMLGradleWriter {
     }
 
     builder.appendLine("}")
+
+    // The Kotlin Gradle extension is a project-level extension, not nested inside android {}.
+    if (config.enableKotlinOptions) {
+      builder.appendLine()
+      builder.appendLine("kotlin {")
+      builder.appendLine("    compilerOptions {")
+      builder.appendLine(
+          "        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.fromTarget(\"${config.javaVersion.versionNumber}\"))"
+      )
+      builder.appendLine("    }")
+      builder.appendLine("}")
+    }
 
     // Dependencies
     if (config.dependencies.isNotEmpty()) {
@@ -583,6 +580,22 @@ class ModuleGradleConfigBuilder {
     require(namespace.isNotBlank()) { "Namespace cannot be blank" }
     require(compileSdk > 0) { "Compile SDK must be greater than 0" }
     requireNotNull(defaultConfig) { "Default config must be set" }
+    require(defaultConfig!!.minSdk in 1..compileSdk) {
+      "Minimum SDK must be between 1 and compile SDK"
+    }
+    require(defaultConfig!!.targetSdk in defaultConfig!!.minSdk..compileSdk) {
+      "Target SDK must be between minimum SDK and compile SDK"
+    }
+    if (enableCompose || BuildFeature.COMPOSE in buildFeatures) {
+      require(enableKotlinOptions) { "Compose requires the Kotlin Android plugin" }
+      require(composeCompilerVersion == null) {
+        "Compose compiler 1.x is incompatible with Kotlin 2.x; use the Kotlin Compose Gradle plugin"
+      }
+      require(plugins.any { it.plugin == "libs.plugins.kotlin.compose" ||
+          it.plugin == "org.jetbrains.kotlin.plugin.compose" }) {
+        "Compose requires org.jetbrains.kotlin.plugin.compose at the same version as Kotlin"
+      }
+    }
 
     return ModuleGradleConfig(
         plugins = plugins.toList(),
