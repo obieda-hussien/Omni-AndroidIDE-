@@ -157,7 +157,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
       - name: Test injected Gradle plugin classloading and run tooling API tests
-        run: ./gradlew :tooling:plugin:test --tests dev.mutwakil.androidide.gradle.LogSenderClassloadingTest :tooling:impl:build --continue
+        run: |
+          ./gradlew :tooling:plugin:test --tests dev.mutwakil.androidide.gradle.LogSenderClassloadingTest
+          ./gradlew :tooling:impl:build --continue
         env:
           ANDROIDIDE_TEST: true
           TEST_TOOLING_API_IMPL: true
