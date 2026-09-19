@@ -62,6 +62,21 @@ class AndroidIDEPluginTest {
   }
 
   @Test
+  fun `test explicit logsender on internal build fails open without bundled aar`() {
+    val result = buildProject(
+      pluginTestEnv = false,
+      configureArgs = {
+        it.add("-P$PROPERTY_LOGSENDER_ENABLED=true")
+      }
+    )
+
+    assertThat(result.output).contains(
+      "Skipping optional LogSender instrumentation so the user's project can still build."
+    )
+    assertThat(result.output).doesNotContain("Could not find io.github.wadamzmail.androidide.logging:logsender")
+  }
+
+  @Test
   fun `test bundled logsender aar is preferred over maven`() {
     val aar = createMinimalLogSenderAar()
 
