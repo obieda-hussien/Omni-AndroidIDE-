@@ -120,7 +120,7 @@ class GameActivity : Template {
           Log.d("GameActivity", "Project structure created successfully")
 
           // Copy wrapper files (gradlew, gradle folder)
-          TemplateAssets.install(context, "$"+"ASSETS_BASE_PATH", projectRoot)
+          TemplateAssets.install(context, ASSETS_BASE_PATH, projectRoot)
           // Copy others
           copyOthers(context, projectRoot)
 

@@ -116,7 +116,7 @@ class NativeCpp : Template {
           Log.d("NativeCpp", "Project structure created successfully")
 
           // Copy wrapper files (gradlew, gradle folder)
-          TemplateAssets.install(context, "$"+"ASSETS_BASE_PATH", projectRoot)
+          TemplateAssets.install(context, ASSETS_BASE_PATH, projectRoot)
 
           // Create version catalog
           val versions = buildList {

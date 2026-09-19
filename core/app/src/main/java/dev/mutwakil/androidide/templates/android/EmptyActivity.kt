@@ -110,7 +110,7 @@ class EmptyActivity : Template {
           Log.d("EmptyActivity", "Project structure created successfully")
 
           // Copy wrapper files (gradlew, gradle folder)
-          TemplateAssets.install(context, "$"+"ASSETS_BASE_PATH", projectRoot)
+          TemplateAssets.install(context, ASSETS_BASE_PATH, projectRoot)
 
           val versions = buildList {
             add(
