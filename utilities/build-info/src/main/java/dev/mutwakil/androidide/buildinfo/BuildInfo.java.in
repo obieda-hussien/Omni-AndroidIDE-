@@ -23,46 +23,71 @@ package dev.mutwakil.androidide.buildinfo;
 public class BuildInfo {
 
   // ---------- Basic info -----------------
+  /** Internal product name. */
   public static final String INTERNAL_NAME = "@@INTERNAL_NAME@@";
+  /** AndroidIDE application package name. */
   public static final String PACKAGE_NAME = "@@PACKAGE_NAME@@";
 
   // ---------- Tooling version info --------------
+  /** Minimum supported Android Gradle Plugin version (legacy field name). */
   public static final String AGP_VERSION_MININUM = "@@AGP_VERSION_MININUM@@";
+  /** Android Gradle Plugin version used for tooling tests. */
   public static final String AGP_VERSION_LATEST = "@@AGP_VERSION_LATEST@@";
+  /** Gradle version used for the latest supported tooling tests. */
   public static final String AGP_VERSION_GRADLE_LATEST = "@@AGP_VERSION_GRADLE_LATEST@@";
 
   // ---------- Maven version info ----------------
 
+  /** Maven group used by AndroidIDE publications. */
   public static final String MVN_GROUP_ID = "@@MVN_GROUP_ID@@";
 
+  /** Full build version. */
   public static final String VERSION_NAME = "@@VERSION_NAME@@";
+  /** Human-readable build version. */
   public static final String VERSION_NAME_SIMPLE = "@@VERSION_NAME_SIMPLE@@";
+  /** Version used for Maven publications. */
   public static final String VERSION_NAME_PUBLISHING = "@@VERSION_NAME_PUBLISHING@@";
+  /** Version used in downloadable artifacts. */
   public static final String VERSION_NAME_DOWNLOAD = "@@VERSION_NAME_DOWNLOAD@@";
 
   // --------- CI info --------------------
 
+  /** Whether this build runs in continuous integration. */
   public static final boolean CI_BUILD = @@CI_BUILD@@;
+  /** Git branch associated with the build. */
   public static final String CI_GIT_BRANCH = "@@CI_GIT_BRANCH@@";
+  /** Abbreviated Git commit hash associated with the build. */
   public static final String CI_GIT_COMMIT_HASH = "@@CI_COMMIT_HASH@@";
 
   // --------- CI info --------------------
 
+  /** Whether the build targets F-Droid. */
   public static final boolean FDROID_BUILD = @@FDROID_BUILD@@;
+  /** F-Droid version name, when configured. */
   public static final String FDROID_BUILD_VERSION_NAME = "@@FDROID_BUILD_VERSION_NAME@@";
+  /** F-Droid version code, or -1 when not configured. */
   public static final int FDROID_BUILD_VERSION_CODE = @@FDROID_BUILD_VERSION_CODE@@;
 
   // ------- SCM info --------------------
 
+  /** Host serving the project's source repository. */
   public static final String REPO_HOST = "@@REPO_HOST@@";
+  /** Owner of the project's source repository. */
   public static final String REPO_OWNER = "@@REPO_OWNER@@";
+  /** Source repository name. */
   public static final String REPO_NAME = "@@REPO_NAME@@";
+  /** HTTPS URL of the source repository. */
   public static final String REPO_URL = "https://@@REPO_HOST@@/@@REPO_OWNER@@/@@REPO_NAME@@";
+  /** Git SCM connection string. */
   public static final String SCM_GIT = "scm:git:git://@@REPO_HOST@@/@@REPO_OWNER@@/@@REPO_NAME@@.git";
+  /** SSH SCM developer connection string. */
   public static final String SCM_SSH = "scm:git:ssh://git@@@REPO_HOST@@/@@REPO_OWNER@@/@@REPO_NAME@@.git";
 
   // ------- Misc ------------------------
+  /** Public website for the project. */
   public static final String PROJECT_SITE = "@@PROJECT_SITE@@";
+  /** Maven repository for snapshots. */
   public static final String SNAPSHOTS_REPOSITORY = "@@SNAPSHOTS_REPOSITORY@@";
+  /** Public Maven repository. */
   public static final String PUBLIC_REPOSITORY = "@@PUBLIC_REPOSITORY@@";
 }
