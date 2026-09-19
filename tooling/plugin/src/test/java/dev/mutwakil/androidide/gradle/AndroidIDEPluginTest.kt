@@ -65,6 +65,7 @@ class AndroidIDEPluginTest {
   fun `test explicit logsender on internal build fails open without bundled aar`() {
     val result = buildProject(
       pluginTestEnv = false,
+      tasks = listOf(":app:checkDebugAarMetadata"),
       configureArgs = {
         it.add("-P$PROPERTY_LOGSENDER_ENABLED=true")
       }
@@ -80,9 +81,12 @@ class AndroidIDEPluginTest {
   fun `test bundled logsender aar is preferred over maven`() {
     val aar = createMinimalLogSenderAar()
 
-    val result = buildProject(configureArgs = {
-      it.add("-P$_PROPERTY_LOGSENDER_LOCAL_AAR=${aar.absolutePath}")
-    })
+    val result = buildProject(
+      tasks = listOf(":app:checkDebugAarMetadata"),
+      configureArgs = {
+        it.add("-P$_PROPERTY_LOGSENDER_LOCAL_AAR=${aar.absolutePath}")
+      }
+    )
 
     assertThat(result.output).contains(
       "Adding LogSender dependency (bundled with AndroidIDE, file '${aar.name}')"
