@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.IBinder
 import com.omnilink.sdk.AgentTaskEvent
+import com.omnilink.sdk.AgentGatewayManifest
 import com.omnilink.sdk.AgentTaskSnapshot
 import com.omnilink.sdk.AgentTaskEventPage
 import com.omnilink.sdk.AgentConversationSnapshot
@@ -51,18 +52,27 @@ class OmniAgentClient(private val context: Context) {
     private var remote: IAgentGatewayService? = null
     @Volatile
     private var connection: ServiceConnection? = null
+    @Volatile
+    private var negotiation: GatewayNegotiation? = null
     private val connectMutex = Mutex()
 
-    suspend fun gatewayManifest(): String {
-        val service = connect()
-        return service.getGatewayManifest(OmniLinkConstants.CURRENT_PROTOCOL_VERSION)
-    }
+    private data class GatewayNegotiation(
+        val protocolVersion: Int,
+        val manifest: AgentGatewayManifest
+    )
+
+    suspend fun gatewayManifest(): String =
+        json.encodeToString(AgentGatewayManifest.serializer(), negotiate().manifest)
 
     suspend fun listConversations(
         query: AgentConversationQuery = AgentConversationQuery()
     ): AgentConversationList {
+        val negotiated = negotiate()
+        check(negotiated.protocolVersion >= 4 && negotiated.manifest.supportsHistoryRead) {
+            "Connected Workspace does not support canonical history yet. Update Omni Dev Workspace to OmniLink v1.2+."
+        }
         val raw = connect().listAgentConversations(
-            OmniLinkConstants.CURRENT_PROTOCOL_VERSION,
+            negotiated.protocolVersion,
             json.encodeToString(AgentConversationQuery.serializer(), query)
         )
         gatewayError(raw)?.let { throw IllegalStateException(it) }
@@ -73,8 +83,12 @@ class OmniAgentClient(private val context: Context) {
         conversationId: String,
         query: AgentConversationReadQuery = AgentConversationReadQuery()
     ): AgentConversationSnapshot {
+        val negotiated = negotiate()
+        check(negotiated.protocolVersion >= 4 && negotiated.manifest.supportsHistoryRead) {
+            "Connected Workspace does not support canonical history yet. Update Omni Dev Workspace to OmniLink v1.2+."
+        }
         val raw = connect().getAgentConversation(
-            OmniLinkConstants.CURRENT_PROTOCOL_VERSION,
+            negotiated.protocolVersion,
             conversationId,
             json.encodeToString(AgentConversationReadQuery.serializer(), query)
         )
@@ -84,7 +98,7 @@ class OmniAgentClient(private val context: Context) {
 
     suspend fun taskSnapshot(taskId: String): AgentTaskSnapshot {
         val raw = connect().getTaskSnapshot(
-            OmniLinkConstants.CURRENT_PROTOCOL_VERSION,
+            negotiate().protocolVersion,
             taskId
         )
         return json.decodeFromString(AgentTaskSnapshot.serializer(), raw)
@@ -95,8 +109,12 @@ class OmniAgentClient(private val context: Context) {
         afterSequence: Long,
         limit: Int = 50
     ): AgentTaskEventPage {
+        val negotiated = negotiate()
+        check(negotiated.protocolVersion >= 4 && negotiated.manifest.supportsEventReplay) {
+            "Connected Workspace does not support live event replay yet. Update Omni Dev Workspace to OmniLink v1.2+."
+        }
         val raw = connect().getTaskEvents(
-            OmniLinkConstants.CURRENT_PROTOCOL_VERSION,
+            negotiated.protocolVersion,
             taskId,
             afterSequence.coerceAtLeast(0L),
             limit.coerceIn(1, 50)
@@ -147,8 +165,9 @@ class OmniAgentClient(private val context: Context) {
         }
 
         try {
+            val negotiated = negotiate()
             connect().startAgentTask(
-                OmniLinkConstants.CURRENT_PROTOCOL_VERSION,
+                negotiated.protocolVersion,
                 requestJson,
                 callback
             )
@@ -177,6 +196,25 @@ class OmniAgentClient(private val context: Context) {
         runCatching { appContext.unbindService(conn) }
         connection = null
         remote = null
+        negotiation = null
+    }
+
+    private suspend fun negotiate(): GatewayNegotiation {
+        negotiation?.let { return it }
+        val service = connect()
+        val raw = service.getGatewayManifest(OmniLinkConstants.CURRENT_PROTOCOL_VERSION)
+        val manifest = json.decodeFromString(AgentGatewayManifest.serializer(), raw)
+        val preferred = minOf(
+            OmniLinkConstants.CURRENT_PROTOCOL_VERSION,
+            manifest.maxSupportedVersion
+        )
+        check(preferred >= manifest.minSupportedVersion) {
+            "No compatible OmniLink Agent Gateway protocol. AndroidIDE=" +
+                OmniLinkConstants.CURRENT_PROTOCOL_VERSION +
+                ", Workspace=" + manifest.minSupportedVersion + ".." +
+                manifest.maxSupportedVersion
+        }
+        return GatewayNegotiation(preferred, manifest).also { negotiation = it }
     }
 
     private suspend fun connect(): IAgentGatewayService = withTimeout(10_000) {
@@ -216,11 +254,13 @@ class OmniAgentClient(private val context: Context) {
 
                     override fun onServiceDisconnected(name: ComponentName?) {
                         remote = null
+                        negotiation = null
                     }
 
                     override fun onBindingDied(name: ComponentName?) {
                         remote = null
                         connection = null
+                        negotiation = null
                         if (continuation.isActive) {
                             continuation.resumeWithException(
                                 IllegalStateException("Omni Agent Gateway binding died")
@@ -231,6 +271,7 @@ class OmniAgentClient(private val context: Context) {
                     override fun onNullBinding(name: ComponentName?) {
                         remote = null
                         connection = null
+                        negotiation = null
                         runCatching { appContext.unbindService(this) }
                         if (continuation.isActive) {
                             continuation.resumeWithException(
