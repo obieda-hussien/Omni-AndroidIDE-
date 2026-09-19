@@ -85,3 +85,30 @@ tasks.named<Jar>("jar") {
   archiveClassifier.set("") // Removes the default "all" classifier
   archiveVersion.set("")
 }
+
+
+val verifyLogSenderAgpIsolation by tasks.registering {
+  group = "verification"
+  description = "Verifies that the injected LogSender plugin has no static Android Gradle Plugin links."
+  dependsOn(tasks.named("classes"))
+
+  doLast {
+    val classFiles = fileTree(layout.buildDirectory.dir("classes/kotlin/main")) {
+      include("**/LogSenderPlugin*.class")
+    }.files
+
+    check(classFiles.isNotEmpty()) {
+      "No compiled LogSenderPlugin classes were found."
+    }
+
+    val forbiddenPackage = "com/android/build/api/"
+    val offendingFiles = classFiles.filter { classFile ->
+      String(classFile.readBytes(), Charsets.ISO_8859_1).contains(forbiddenPackage)
+    }
+
+    check(offendingFiles.isEmpty()) {
+      "LogSenderPlugin must remain AGP-classloader independent. Static AGP references found in: " +
+        offendingFiles.joinToString { it.name }
+    }
+  }
+}
