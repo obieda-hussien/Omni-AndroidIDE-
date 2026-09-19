@@ -74,6 +74,21 @@ internal object TemplateAssets {
     }
   }
 
+  fun escapeXml(text: String): String = buildString(text.length) {
+    for (char in text) {
+      append(
+        when (char) {
+          '&' -> "&amp;"
+          '<' -> "&lt;"
+          '>' -> "&gt;"
+          '"' -> "&quot;"
+          '\'' -> "&apos;"
+          else -> char.toString()
+        }
+      )
+    }
+  }
+
   private fun validateLauncherIcons(res: File) {
     val adaptive = listOf("mipmap-anydpi-v26", "mipmap-anydpi")
       .map { File(res, it) }
