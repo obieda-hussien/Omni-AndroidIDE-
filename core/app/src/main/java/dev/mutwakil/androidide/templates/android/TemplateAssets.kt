@@ -75,7 +75,10 @@ internal object TemplateAssets {
   }
 
   private fun validateLauncherIcons(res: File) {
-    val adaptive = File(res, "mipmap-anydpi-v26")
+    val adaptive = listOf("mipmap-anydpi-v26", "mipmap-anydpi")
+      .map { File(res, it) }
+      .firstOrNull { it.isDirectory }
+      ?: error("Missing adaptive launcher icon directory")
     for (name in listOf("ic_launcher.xml", "ic_launcher_round.xml")) {
       require(File(adaptive, name).isFile) {
         "Missing adaptive launcher icon: ${adaptive.absolutePath}/$name"
