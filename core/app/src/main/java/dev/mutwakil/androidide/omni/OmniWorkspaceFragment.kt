@@ -815,10 +815,15 @@ class OmniWorkspaceFragment : Fragment() {
             runCatching { syncConversationFromWorkspace(id) }
                 .onFailure {
                     if (conversationId == id) {
-                        showStatus(
-                            "Offline cache • Workspace history unavailable: " +
-                                (it.message ?: it.javaClass.simpleName)
-                        )
+                        val message = it.message ?: it.javaClass.simpleName
+                        val isUnsavedNewChat =
+                            message.contains("conversation_not_found", ignoreCase = true) &&
+                                store.transcript(id).isBlank()
+                        if (isUnsavedNewChat) {
+                            showStatus("New Omni conversation")
+                        } else {
+                            showStatus("Offline cache • Workspace history unavailable: " + message)
+                        }
                     }
                 }
             if (conversationId == id) resumeTaskIfNeeded(id)
@@ -1197,7 +1202,7 @@ class OmniWorkspaceFragment : Fragment() {
             val pendingLocal = store.list(projectRoot).firstOrNull { item ->
                 item.id == conversationId &&
                     item.id !in remoteIds &&
-                    store.transcript(item.id).isBlank()
+                    (store.transcript(item.id).isBlank() || currentTaskId != null)
             }
             val merged = if (pendingLocal != null) listOf(pendingLocal) + remoteItems else remoteItems
             renderHistoryItems(merged, query)
