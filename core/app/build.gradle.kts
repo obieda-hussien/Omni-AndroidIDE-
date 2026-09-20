@@ -185,6 +185,10 @@ dependencies {
     kapt(libs.google.auto.service)
     kapt(projects.annotation.processors)
     kapt(libs.androidx.room.compiler)
+    // OmniLink v2 is compiled with Kotlin 2.4; Room's annotation processor must
+    // decode its 2.4 metadata even while AndroidIDE itself compiles with Kotlin 2.3.
+    // Limit the newer metadata reader to the isolated KAPT processor classpath.
+    kapt("org.jetbrains.kotlin:kotlin-metadata-jvm:2.4.10")
 
     implementation(libs.common.editor)
     implementation(libs.common.utilcode)
