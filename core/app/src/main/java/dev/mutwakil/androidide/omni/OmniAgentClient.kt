@@ -7,6 +7,9 @@ import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.IBinder
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import android.util.Log
 import com.omnilink.sdk.AgentTaskEvent
 import com.omnilink.sdk.AgentGatewayManifest
 import com.omnilink.sdk.AgentTaskSnapshot
@@ -19,6 +22,8 @@ import com.omnilink.sdk.AgentTaskRequest
 import com.omnilink.sdk.IAgentGatewayService
 import com.omnilink.sdk.IOmniAgentCallback
 import com.omnilink.sdk.OmniLinkConstants
+import com.omnilink.sdk.trusted.TrustedServiceResolver
+import com.omnilink.sdk.trusted.TrustedServicePolicy
 import java.util.UUID
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -42,6 +47,7 @@ class OmniAgentClient(private val context: Context) {
     }
 
     private val appContext = context.applicationContext
+    private val sharedMemory = OmniWorkspaceMemoryClient(appContext)
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
@@ -60,6 +66,16 @@ class OmniAgentClient(private val context: Context) {
         val protocolVersion: Int,
         val manifest: AgentGatewayManifest
     )
+
+    /** Read bounded, versioned shared records from the verified Workspace service. */
+    suspend fun searchSharedMemory(query: String, limit: Int = 8): String =
+        sharedMemory.search(query, limit)
+
+    suspend fun sharedMemoryChangesSince(epochMillis: Long, limit: Int = 8): String =
+        sharedMemory.changesSince(epochMillis, limit)
+
+    suspend fun publishProjectMemory(): Boolean =
+        sharedMemory.publishProjectSnapshot()
 
     suspend fun gatewayManifest(): String =
         json.encodeToString(AgentGatewayManifest.serializer(), negotiate().manifest)
@@ -207,7 +223,15 @@ class OmniAgentClient(private val context: Context) {
             close()
         }
 
+        // Best effort and non-blocking: an offline Workspace memory service never stops chat/agent.
+        // It shares bounded project metadata, never the full active editor contents or credentials.
+        val memorySyncJob = launch(Dispatchers.IO) {
+            runCatching { sharedMemory.publishProjectSnapshot() }
+                .onFailure { Log.w("OmniWorkspaceMemory", "Context sync unavailable", it) }
+        }
+
         awaitClose {
+            memorySyncJob.cancel()
             val binder = taskBinder
             val recipient = deathRecipient
             if (binder != null && recipient != null) {
@@ -341,24 +365,22 @@ class OmniAgentClient(private val context: Context) {
     }
 
     private fun discoverGateway(): ComponentName? {
-        val pm = appContext.packageManager
-        val intent = Intent(OmniLinkConstants.ACTION_AGENT_GATEWAY_BIND)
-        val matches = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            pm.queryIntentServices(intent, PackageManager.ResolveInfoFlags.of(0))
-        } else {
-            @Suppress("DEPRECATION")
-            pm.queryIntentServices(intent, 0)
-        }
-
-        return matches.asSequence()
-            .mapNotNull { it.serviceInfo }
-            .filter { it.exported }
-            .filter {
-                pm.checkSignatures(appContext.packageName, it.packageName) ==
-                    PackageManager.SIGNATURE_MATCH
-            }
-            .map { ComponentName(it.packageName, it.name) }
-            .firstOrNull()
+        // Package/action alone is never a trust signal. The v2 resolver verifies the
+        // real service permission and final APK signer before producing an explicit component.
+        val allowedPackages = setOf(
+            "com.omnidev.workspace",
+            "com.omnidev.workspace.norm",
+            "com.omnidev.workspace.pro",
+            "com.omnidev.workspace.oem",
+            "com.omnidev.workspace.admin"
+        )
+        return TrustedServiceResolver(appContext).query(
+            TrustedServicePolicy(
+                action = OmniLinkConstants.ACTION_AGENT_GATEWAY_BIND,
+                requiredPermission = OmniLinkConstants.PERMISSION_BIND_AGENT,
+                allowedPackages = allowedPackages
+            )
+        ).verified.firstOrNull()?.component
     }
 }
 

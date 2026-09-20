@@ -15,6 +15,9 @@
     <intent>
       <action android:name="com.omnilink.sdk.action.AGENT_GATEWAY_BIND" />
     </intent>
+    <intent>
+      <action android:name="com.omnilink.sdk.action.EXTENSION_BIND" />
+    </intent>
   </queries>
 
   <!-- Workspace is the single permission owner. Remove identical declarations contributed
@@ -28,6 +31,7 @@
     tools:node="remove" />
 
   <uses-permission android:name="com.omnilink.sdk.permission.BIND_AGENT" />
+  <uses-permission android:name="com.omnilink.sdk.permission.BIND_EXTENSION" />
   <uses-permission android:name="dev.mutwakil.androidide.permission.BIND_LOG_SERVICE" />
   <uses-permission android:name="android.permission.INTERNET" />
   <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -144,6 +148,13 @@
     <service
       android:exported="false"
       android:name=".services.builder.GradleBuildService" />
+
+    <!-- Opaque per-recipient grants; never export the IDE project tree as a public provider. -->
+    <provider
+      android:name=".omni.OmniIdePayloadProvider"
+      android:authorities="${applicationId}.omnilink.payloads"
+      android:exported="false"
+      android:grantUriPermissions="true" />
 
     <service
       android:name=".omni.OmniIdeExtensionService"
