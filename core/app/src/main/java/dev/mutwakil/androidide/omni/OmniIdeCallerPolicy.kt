@@ -27,7 +27,16 @@ internal object OmniIdeCallerPolicy {
     )
 
     fun allowed(packageName: String, sameSigner: Boolean, capability: String): Boolean {
-        if (!sameSigner || !capability.startsWith("ide.")) return false
+        if (!sameSigner) return false
+        // Event subscriptions are metadata-only IPC. The SDK calls this through
+        // registerEventListener(), outside the ide.* action namespace. The extension
+        // service separately authenticates the Binder caller before this policy check.
+        if (capability == "register_event_listener") {
+            return packageName in setOf(
+                ADMIN, BASE, BASE + ".norm", BASE + ".pro", BASE + ".oem"
+            )
+        }
+        if (!capability.startsWith("ide.")) return false
         return when (packageName) {
             ADMIN -> true
             BASE + ".pro", BASE + ".oem" -> capability in read || capability in build

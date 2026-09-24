@@ -74,7 +74,8 @@ class OmniIdeExtensionService : ExtensionService() {
         classDiscriminator = "type"
     }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val buildController by lazy { OmniIdeBuildController(applicationContext) }
+    private val buildControllerDelegate = lazy { OmniIdeBuildController(applicationContext) }
+    private val buildController get() = buildControllerDelegate.value
     private val listeners = RemoteCallbackList<IOmniEventCallback>()
     private val jobRecords = ConcurrentHashMap<String, IdeJobRecord>()
     private val runningJobs = ConcurrentHashMap<String, Job>()
@@ -169,21 +170,49 @@ class OmniIdeExtensionService : ExtensionService() {
 
     override fun onCreate() {
         super.onCreate()
+        Log.i(TAG, "OmniLink extension service starting")
         OmniIdeStateBridge.addBuildOutputListener(buildOutputListener)
         OmniIdeObservabilityBridge.setObserverEnabled(true)
-        lookupLogService()?.setOmniObserverEnabled(true)
+        // The log receiver is optional: a broken/stopping LogSender must not crash the
+        // IDE simply because OmniLink discovery binds this otherwise headless service.
+        updateOptionalLogObserver(enabled = true)
+        Log.i(TAG, "OmniLink extension service ready")
+    }
+
+    override fun onBind(intent: Intent?): android.os.IBinder {
+        Log.i(TAG, "OmniLink extension binding: action=" + intent?.action)
+        return super.onBind(intent)
     }
 
     override fun onDestroy() {
+        Log.i(TAG, "OmniLink extension service stopping")
         OmniIdeStateBridge.removeBuildOutputListener(buildOutputListener)
         OmniIdeObservabilityBridge.setObserverEnabled(false)
-        lookupLogService()?.setOmniObserverEnabled(false)
+        updateOptionalLogObserver(enabled = false)
         runningJobs.values.forEach { it.cancel() }
         runningJobs.clear()
         listeners.kill()
-        buildController.release()
+        // Merely discovering capabilities must never initialize the Gradle controller
+        // during service teardown. Only release it when a build/sync created it.
+        if (buildControllerDelegate.isInitialized()) {
+            try {
+                buildControllerDelegate.value.release()
+            } catch (error: Exception) {
+                Log.w(TAG, "Gradle controller cleanup failed", error)
+            }
+        }
         scope.cancel()
         super.onDestroy()
+    }
+
+    private fun updateOptionalLogObserver(enabled: Boolean) {
+        try {
+            lookupLogService()?.setOmniObserverEnabled(enabled)
+        } catch (error: Exception) {
+            Log.w(TAG, "Optional LogSender observer unavailable; enabled=$enabled", error)
+        } catch (error: LinkageError) {
+            Log.w(TAG, "Optional LogSender observer has incompatible classes", error)
+        }
     }
 
     override suspend fun onAction(caller: CallerContext, request: ActionRequest): ActionOutcome {
