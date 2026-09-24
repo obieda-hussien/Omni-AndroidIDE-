@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# OmniLink v2 is a multi-module Gradle publication. The aggregate is POM-only:
-# NEVER request OmniLinkSDK-v2.0.1.aar (that file cannot exist).
-VERSION="${OMNILINK_VERSION:-v2.0.1}"
+# OmniLink v3 is a multi-module Gradle publication. The aggregate is POM-only:
+# NEVER request OmniLinkSDK-v3.0.0.aar (that file cannot exist).
+VERSION="${OMNILINK_VERSION:-v3.0.0}"
 GROUP_PATH="com/github/obieda-hussien/OmniLinkSDK"
 DEST_ROOT="${OMNILINK_LOCAL_REPO:-$PWD/ci-m2}"
 BASE_URL="https://jitpack.io/$GROUP_PATH"

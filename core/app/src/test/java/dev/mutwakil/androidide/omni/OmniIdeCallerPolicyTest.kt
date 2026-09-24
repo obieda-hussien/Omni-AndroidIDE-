@@ -39,6 +39,26 @@ class OmniIdeCallerPolicyTest {
     }
 
     @Test
+    fun eventSubscriptionsRequireRecognizedSignedWorkspace() {
+        listOf(
+            "com.omnidev.workspace",
+            "com.omnidev.workspace.norm",
+            "com.omnidev.workspace.pro",
+            "com.omnidev.workspace.oem",
+            "com.omnidev.workspace.admin"
+        ).forEach {
+            assertTrue(OmniIdeCallerPolicy.allowed(it, true, "register_event_listener"))
+            assertFalse(OmniIdeCallerPolicy.allowed(it, false, "register_event_listener"))
+        }
+        assertFalse(
+            OmniIdeCallerPolicy.allowed("com.unknown.app", true, "register_event_listener")
+        )
+        assertFalse(
+            OmniIdeCallerPolicy.allowed("com.omnidev.workspace.admin", true, "unregister_event_listener")
+        )
+    }
+
+    @Test
     fun unknownPeerNeverReadsIdeProject() {
         assertFalse(OmniIdeCallerPolicy.allowed("com.unknown.app", true, "ide.get_project_context"))
         assertFalse(OmniIdeCallerPolicy.allowed("com.unknown.app", false, "ide.get_project_context"))
