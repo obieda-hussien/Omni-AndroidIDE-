@@ -5,7 +5,7 @@ It does not publish a new SDK release or silently merge OmniDev PR #90 into `mai
 
 ## Build and distribution
 
-- Trusted Android artifact: `com.github.obieda-hussien.OmniLinkSDK:omni-link-sdk:v2.0.0`.
+- Trusted Android artifact: `com.github.obieda-hussien.OmniLinkSDK:omni-link-sdk:v2.0.1`.
 - A public third-party app should use `omni-link-public` only.
 - CI stages the real Android and JVM module artifacts; the aggregate is POM-only.
 - A downloaded/copied trusted AAR **never** grants first-party identity. Final installed APK
