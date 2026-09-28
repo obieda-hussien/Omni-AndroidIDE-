@@ -63,7 +63,7 @@ class OmniIdeExtensionService : ExtensionService() {
     companion object {
         private const val TAG = "OmniIdeExtension"
         private const val MIN_PROTOCOL = 3
-        private const val MAX_PROTOCOL = 3
+        private const val MAX_PROTOCOL = OmniLinkConstants.CURRENT_PROTOCOL_VERSION
         private val PACKAGE_ID_REGEX =
             Regex("^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)+$")
     }

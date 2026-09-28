@@ -1,22 +1,31 @@
-# OmniLink v2 integration (historical)
+# OmniLink v3.0.0 — OmniDev / AndroidIDE integration
 
-This document describes the prior v2 integration. For the current v3 release and
-consumer compatibility, see [OMNILINK_V3_INTEGRATION.md](OMNILINK_V3_INTEGRATION.md).
-
-# OmniLink v2 — OmniDev / AndroidIDE integration
-
-This change targets OmniDev `feature/omnilink-v1.2-live-history` and AndroidIDE `dev`.
-It does not publish a new SDK release or silently merge OmniDev PR #90 into `main`.
+The SDK v3.0.0 release is published; Workspace integrates on `main` and AndroidIDE on `dev`.
+The two Android APKs must use the same signing identity for trusted Binder access.
 
 ## Build and distribution
 
-- Trusted Android artifact: `com.github.obieda-hussien.OmniLinkSDK:omni-link-sdk:v2.0.1`.
+- Trusted Android artifact: `com.github.obieda-hussien.OmniLinkSDK:omni-link-sdk:v3.0.0`.
 - A public third-party app should use `omni-link-public` only.
 - CI stages the real Android and JVM module artifacts; the aggregate is POM-only.
 - A downloaded/copied trusted AAR **never** grants first-party identity. Final installed APK
   signing identity and the receiving service's own ACL decide authority.
 - Private Maven distribution for the trusted AAR is a separate future supply-chain step; do not
   confuse it with runtime security. No secret/signing private key is embedded in source.
+
+## v3 protocol and capability trust
+
+AndroidIDE advertises protocol versions 3 through 5; Workspace negotiates the highest
+mutually supported version (5 with v3.0.0). The Binder ABI is unchanged and version 3
+callers remain accepted. Workspace validates discovered manifests against the verified
+provider identity and SDK v3 limits before showing or resolving capabilities. A manifest
+never grants permissions by itself. The IDE still enforces package signer, tier policy
+and per-action access; Workspace still requests confirmation on risky actions.
+
+SDK v3 adds optional trusted discovery, consent/grant coordination and an authorized
+external-app executor. This integration uses the validated capability catalog with the
+existing Workspace approval gate. It does not claim an installed-device consent flow
+for third-party apps or grant their capabilities privileged access.
 
 ## Android identity and flavor policy
 
@@ -72,7 +81,7 @@ resume is a feature of the SDK's encrypted network data plane, not of this URI p
 
 ## Acceptance checks
 
-1. `Gradle v2` module artifact staging succeeds, including JVM transport transitive dependency.
+1. `Gradle v3` module artifact staging succeeds, including JVM transport transitive dependency.
 2. Same-signed Admin can invoke IDE writes; Lite/Norm/Pro/OEM mutation attempts are denied in the
    IDE service itself.
 3. An unsigned APK copying OmniLink, package names, Intent actions or a manifest cannot bind to
